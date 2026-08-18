@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "order 主题 Data Agent 引擎：OAG 理解 → MQL → 确定性翻译 → SQL 执行（DSH + Python）"
 requires-python = ">=3.11"
 dependencies = [
-    "mcp>=1.0",
+    "mcp>=1.0,<2.0",
     "pyyaml>=6.0",
 ]
 

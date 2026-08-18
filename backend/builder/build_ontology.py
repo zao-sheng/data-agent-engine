@@ -94,6 +94,7 @@ def build(sqlite_path: Path) -> dict:
 
 
 def dump(base: Path, data: dict) -> None:
+    base.mkdir(parents=True, exist_ok=True)
     (base / "objects.yaml").write_text(
         "# 自动生成骨架 —— 人工补：description / required_filters 核对 / granularities 核对\n"
         + yaml.safe_dump({"objects": data["objects"]}, allow_unicode=True, sort_keys=False))
