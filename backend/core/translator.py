@@ -175,7 +175,7 @@ class Translator:
             t = min(cands_preagg, key=lambda x: (x["authority"] != "gold", x["layer"] not in ("ADS", "DWS")))
             return t, "preagg", []
         if cands_detail:
-            t = cands_detail[0]
+            t = min(cands_detail, key=lambda x: x["authority"] != "gold")
             return t, "detail", self._build_joins(owner, t, needed)
         raise TranslateError(f"无可覆盖该查询的表（指标 {metric_names}，粒度 {gran}，维度 {sorted(needed)}）。"
                              "请走降级链或补充 Ontology 映射。")

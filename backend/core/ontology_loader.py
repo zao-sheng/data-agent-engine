@@ -9,9 +9,6 @@ from pathlib import Path
 
 import yaml
 
-# 维度对象 → SQL 别名（事实表固定为 F）
-DIM_ALIAS = {"Product": "P", "Store": "S", "Region": "R", "ActiveUser": "U"}
-
 
 class Ontology:
     def __init__(self, base: Path | str):
@@ -89,6 +86,22 @@ class Ontology:
         business_names = set(self.functions) | set(self.property_owner)
         self.physical_names -= business_names
 
+        # 维度对象 → SQL 别名（主题无关，动态生成）：
+        # 仅 DIM 层对象参与 JOIN，才需要别名；事实表固定 'F'；
+        # 别名 = 首字母大写，避开 'F'，冲突时追加序号（确定性强）。
+        self.dim_aliases: dict[str, str] = {}
+        counters: dict[str, int] = {}
+        for o in raw_objects:
+            if o.get("source_tables", [{}])[0].get("layer") != "DIM":
+                continue
+            name = o["name"]
+            base = name[0].upper()
+            if base == "F":
+                base = (name[1:2].upper() or "X")
+            c = counters.get(base, 0) + 1
+            counters[base] = c
+            self.dim_aliases[name] = base if c == 1 else f"{base}{c}"
+
     # ── 基础查询 ────────────────────────────────────────────
     def get_object(self, name: str) -> dict | None:
         return self.objects.get(name)
@@ -152,7 +165,7 @@ class Ontology:
         raise KeyError(f"属性 {prop} 在表 {table} 无映射")
 
     def alias_of(self, obj_name: str) -> str:
-        return DIM_ALIAS.get(obj_name, obj_name[0].upper())
+        return self.dim_aliases.get(obj_name, obj_name[0].upper())
 
     # ── 指标族 ──────────────────────────────────────────────
     def family_variants(self, family: str) -> list[str]:
