@@ -1,0 +1,31 @@
+# ============================================================
+# Ontology · 关系（OAG 图遍历的边 + 翻译引擎 JOIN 链的唯一来源）
+# 约束：
+#   * join_key 一律来自这里，翻译引擎永不猜测 JOIN
+#   * 同一对象对之间可有多条边（如 Payment→Product / Refund→Payment）
+# ============================================================
+
+relations:
+  # 下单域
+  - {source: Order, target: Product,   type: contains,   join_key: product_id, cardinality: "N:1"}
+  - {source: Order, target: Store,     type: fulfills,   join_key: store_id,   cardinality: "N:1"}
+  - {source: Order, target: ActiveUser,type: places,     join_key: user_id,    cardinality: "N:1"}
+
+  # 支付域（支付表冗余 product_id/store_id/region_id/user_id，可直连维度）
+  - {source: Payment, target: Product,   type: contains,   join_key: product_id, cardinality: "N:1"}
+  - {source: Payment, target: Store,     type: fulfills,   join_key: store_id,   cardinality: "N:1"}
+  - {source: Payment, target: Region,    type: belongs_to, join_key: region_id,  cardinality: "N:1"}
+  - {source: Payment, target: ActiveUser,type: places,     join_key: user_id,    cardinality: "N:1"}
+
+  # 消费域
+  - {source: Consume, target: Product,   type: contains,   join_key: product_id, cardinality: "N:1"}
+  - {source: Consume, target: Store,     type: fulfills,   join_key: store_id,   cardinality: "N:1"}
+  - {source: Consume, target: Region,    type: belongs_to, join_key: region_id,  cardinality: "N:1"}
+
+  # 退款域（退款表冗余 region_id/store_id，且经 pay_id 关联支付）
+  - {source: Refund, target: Payment,    type: refunds,    join_key: pay_id,     cardinality: "N:1"}
+  - {source: Refund, target: Region,     type: belongs_to, join_key: region_id,  cardinality: "N:1"}
+  - {source: Refund, target: Store,      type: fulfills,   join_key: store_id,   cardinality: "N:1"}
+
+  # 维度间（门店→区域：供跨维度路径 BFS）
+  - {source: Store, target: Region,      type: belongs_to, join_key: region_id,  cardinality: "N:1"}

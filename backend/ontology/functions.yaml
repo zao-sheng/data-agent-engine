@@ -1,0 +1,75 @@
+# ============================================================
+# Ontology · 指标/函数（MQL metric 的来源）
+# 约束：
+#   * formula 只允许白名单函数（SUM/COUNT/AVG/MAX/MIN/DISTINCT）+ 属性名 + 运算符，
+#     翻译引擎按 AST 编译，禁止自由 SQL 字符串拼接
+#   * owner：指标归属的业务对象（决定事实表候选集）
+#   * pre_aggregated 在 objects.yaml 的 source_tables 里声明（{指标名: 物理列}）
+# ============================================================
+
+functions:
+  - name: gmv
+    display_name: GMV
+    description: 有效支付金额合计（口径：is_valid=1 的支付单，不含退款冲减）
+    owner: Payment
+    formula: "SUM(pay_amount)"
+    required_filters: ["is_valid = 1"]
+    supported_dimensions: [channel, product_type, category, store_type, city, region_name, province, user_level, order_date]
+    supported_granularities: [day, week, month, quarter, year]
+    do_not: "必须过滤 is_valid=1；不含退款冲减；GMV 取支付口径而非下单口径"
+    version: v1.0
+
+  - name: order_count
+    display_name: 订单量
+    description: 有效下单数（去重订单号）
+    owner: Order
+    formula: "COUNT(DISTINCT order_id)"
+    required_filters: ["is_valid = 1"]
+    supported_dimensions: [product_type, category, store_type, city, region_name, province, order_status, order_date]
+    supported_granularities: [day, week, month, quarter, year]
+    do_not: "必须过滤 is_valid=1；按下单表统计"
+    version: v1.0
+
+  - name: avg_order_amount
+    display_name: 平均客单价
+    description: 有效支付金额均值，按订单粒度计算（支付口径）
+    owner: Payment
+    formula: "SUM(pay_amount) / COUNT(DISTINCT order_id)"
+    required_filters: ["is_valid = 1"]
+    supported_dimensions: [channel, product_type, category, store_type, city, region_name, province, order_date]
+    supported_granularities: [day, week, month, quarter, year]
+    do_not: "不要直接 AVG(pay_amount)，需先按订单去重再计算"
+    version: v2.0
+
+  - name: consume_amount
+    display_name: 消费金额
+    description: 有效到店消费/核销金额合计
+    owner: Consume
+    formula: "SUM(consume_amount)"
+    required_filters: ["is_valid = 1"]
+    supported_dimensions: [product_type, category, store_type, city, region_name, province, order_date]
+    supported_granularities: [day, week, month, quarter, year]
+    do_not: "消费金额 ≠ 支付金额；消费是核销口径"
+    version: v1.0
+
+  - name: refund_amount
+    display_name: 退款金额
+    description: 有效退款金额合计
+    owner: Refund
+    formula: "SUM(refund_amount)"
+    required_filters: ["is_valid = 1"]
+    supported_dimensions: [store_type, city, region_name, province, order_date]
+    supported_granularities: [day, week, month, quarter, year]
+    do_not: "退款金额统计退款表，不冲减 GMV"
+    version: v1.0
+
+  - name: order_user_cnt
+    display_name: 下单用户数
+    description: 有效下单的去重用户数
+    owner: Order
+    formula: "COUNT(DISTINCT user_id)"
+    required_filters: ["is_valid = 1"]
+    supported_dimensions: [region_name, store_type, city, order_date]
+    supported_granularities: [day, week, month, quarter, year]
+    do_not: ""
+    version: v1.0

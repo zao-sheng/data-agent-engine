@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.uv-cache/
+
+# 样例库可再生成，不入库
+*.db
+*.db-journal
+
+# 敏感信息
+.env
+secrets/
+credentials*
+
+# OS
+.DS_Store

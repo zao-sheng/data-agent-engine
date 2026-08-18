@@ -1,0 +1,75 @@
+"""评测门禁：Golden Dataset 回归。
+
+对每条金标准用例：MQL 校验 → 翻译 → 执行，断言：
+  * 应拒绝的用例必须被校验器拒绝
+  * 其余用例：翻译成功、SQL 可执行、事实表 == 预期表、结果行数 > 0
+通过率 ≥ 90% 才返回 0（CI 门禁），否则返回 1。
+
+用法：python -m eval.eval [--threshold 0.9]
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from core import Executor, MqlValidator, Ontology, Translator  # noqa: E402
+
+BASE = Path(__file__).resolve().parent.parent
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--threshold", type=float, default=0.9)
+    ap.add_argument("--db", default=str(BASE / "seed" / "sample.db"))
+    a = ap.parse_args()
+
+    onto = Ontology(BASE / "ontology")
+    validator = MqlValidator(onto)
+    translator = Translator(onto)
+    executor = Executor(a.db)
+
+    cases = [json.loads(line) for line in
+             (BASE / "eval" / "golden_dataset.jsonl").read_text().splitlines() if line.strip()]
+    passed, failed = 0, []
+
+    for i, case in enumerate(cases, 1):
+        mql = dict(case["mql"])
+        user = mql.pop("_user", None)
+        try:
+            v = validator.validate(mql)
+            if case.get("expect_reject"):
+                if v["ok"]:
+                    raise AssertionError("应被拒绝的用例通过了校验")
+                passed += 1
+                continue
+            if not v["ok"]:
+                raise AssertionError(f"校验失败: {v['errors']}")
+            r = translator.translate(mql, user or {}, dialect="sqlite")
+            if "error" in r:
+                raise AssertionError(f"翻译失败: {r['error']}")
+            if r["metadata"]["fact_table"] != case["expect_table"]:
+                raise AssertionError(f"表选择错误: 期望 {case['expect_table']}，实际 {r['metadata']['fact_table']}")
+            res = executor.execute(r["sql"])
+            if "error" in res:
+                raise AssertionError(f"SQL 执行失败: {res['error']}")
+            if res["row_count"] <= case.get("expect_rows_gt", 0):
+                raise AssertionError(f"结果为空（期望 > {case.get('expect_rows_gt', 0)} 行）")
+            passed += 1
+        except AssertionError as e:
+            failed.append((i, case["question"], str(e)))
+
+    rate = passed / len(cases)
+    print(f"评测门禁：{passed}/{len(cases)} 通过（{rate:.0%}）")
+    for i, q, err in failed:
+        print(f"  ✗ #{i} [{q}] {err}")
+    ok = rate >= a.threshold and not failed
+    print("✅ 通过" if ok else f"❌ 未达门禁（阈值 {a.threshold:.0%}）")
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

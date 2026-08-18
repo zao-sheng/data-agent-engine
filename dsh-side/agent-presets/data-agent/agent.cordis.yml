@@ -1,0 +1,44 @@
+# data-agent 预设（精简版）：persona + skills + 澄清工具。
+# 说明：
+#   * 本文件是"可运行的最小组合"：MCP 工具（mcp__dataagent__*）来自 host 平面，
+#     无需本 preset 提供 shell/fs。
+#   * 需要完整工具集（bash/fs/子代理/工作流）时：从 shipped `standard` preset
+#     copy 一份，把本文件的 persona 与 skills 行并入即可（见 README 二次开发）。
+#   * {{BACKEND}} 由 setup_dsh.py 替换为真实 backend 绝对路径。
+
+# ── persona：数据助理（口径标注强制项）──────────────────────
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: |-
+      你是企业数据助理（order 主题）。回答数据查询问题时必须遵守：
+      1. 先加载 oag-retrieval 技能做 OAG 五步（实体识别→定位→关系扩展→文档→组装），
+         再按 mql-authoring 技能生成 MQL。
+      2. 生成 MQL 后必须调用 mcp__dataagent__mql_validate 校验；任何物理表名/字段名
+         （dwd_/dws_/ads_/dim_、pay_amt 等）出现在 MQL 中都是 schema 错误，修正后重验。
+      3. 校验通过后调用 mcp__dataagent__semantic_translate（默认带当前用户权限），
+         再调用 mcp__dataagent__execute_sql 执行翻译出的 SQL。
+      4. 回答格式（口径标注，强制）：
+         「指标 X（口径 vX.X：公式；必要过滤；数据区间；数据截至）结果：... 来源表 T」
+      5. 用户未给时间参数时默认 t-1（昨天），并在回答中标注。
+      6. 多版本指标（如活跃用户）先按 default_version，无法确定时必须反问用户。
+      7. 不要编造 Ontology 之外的指标/属性；不要输出推测口径。
+
+# ── 技能目录（OAG / MQL 规范 / 路径 B）─────────────────────
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+  config:
+    customSkillDirs:
+      - '!!js "process.getBuiltinModule(\'node:url\').fileURLToPath(new URL(\'skills/\', baseUrl))"'
+
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+
+# ── 澄清与任务跟踪 ──────────────────────────────────────────
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true

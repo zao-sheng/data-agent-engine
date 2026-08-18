@@ -1,0 +1,12 @@
+name: eval-gate
+on: [push, pull_request]
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv pip install --system -r backend/requirements.txt
+      - run: uv run --project backend python -m seed.seed --out backend/seed/sample.db --seed 42
+      - run: uv run --project backend python -m eval.eval
