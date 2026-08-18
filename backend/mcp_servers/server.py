@@ -14,13 +14,19 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
+# 无论以何种方式启动（uv run / 直接 python），都保证能 import core
+BACKEND_ROOT = Path(__file__).resolve().parent.parent
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
 
-from core import Executor, MqlValidator, Ontology, Translator
+from mcp.server.fastmcp import FastMCP  # noqa: E402
 
-BASE = Path(os.environ.get("DATA_AGENT_BACKEND", Path(__file__).resolve().parent.parent))
+from core import Executor, MqlValidator, Ontology, Translator  # noqa: E402
+
+BASE = Path(os.environ.get("DATA_AGENT_BACKEND", BACKEND_ROOT))
 DB = Path(os.environ.get("DATA_AGENT_DB", BASE / "seed" / "sample.db"))
 
 _onto = Ontology(BASE / "ontology")
