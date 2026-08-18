@@ -67,7 +67,29 @@ git clone <repo> && cd data-agent-engine
 
 > 每条提问都会经过：规划（plan-routing）→ OAG 理解 → MQL 校验 → **确认环节** → 确定性翻译 → 口径标注回答。
 
+## 更新与卸载
+
+### 更新（升级到新版）
+```bash
+./install.sh update
+```
+自动完成：`git pull` 拉取最新代码 → 更新依赖 → **重建样例库**（schema 可能变化）→ 更新 DSH 配置
+（patch 块中的 backend 路径、预设覆盖更新，旧预设自动备份为 `data-agent.bak-<时间戳>`）→ 跑评测门禁。
+完成后**重启 DSH** 生效。
+
+### 卸载（移除 DSH 集成与数据文件，源码保留）
+```bash
+./install.sh uninstall
+```
+自动完成：移除 `cordis.patch.yml` 中的 data-agent 块（不碰其他插件配置）→ 删除「数据助理」预设 →
+删除样例库与虚拟环境。**源码（backend/、ontology 等仓库文件）保留**。
+如需彻底移除 `dsh-mcp-client` 依赖（仅当无其他插件使用）：
+`cd ~/.dsh/profiles/web && pnpm remove @deepseek-ai/dsh-mcp-client`
+
+> 三个命令均**幂等**：重复执行安全；卸载只删除本工具创建的内容，不误删用户数据。
+
 ## 能力
+
 
 
 | 能力 | 说明 |
