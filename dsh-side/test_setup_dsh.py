@@ -47,6 +47,15 @@ class PatchBlockTest(unittest.TestCase):
         self.assertIn("mcp_servers/server.py", block)
         self.assertIn("toolCallTimeoutMs: 120000", block)
 
+    def test_block_uses_absolute_script_path_and_cwd(self):
+        """spawn 必须用绝对脚本路径 + cwd 指向 backend（host cwd 是 profile 目录，
+        相对路径会 Errno 2 找不到 mcp_servers/server.py）。"""
+        block = _patch_block(self.backend)
+        self.assertIn(f"'{self.backend}/mcp_servers/server.py'", block)
+        self.assertIn(f"cwd: '{self.backend}'", block)
+        # 不允许出现裸相对脚本路径
+        self.assertNotIn("'python', 'mcp_servers/server.py'", block)
+
     @unittest.skipUnless(HAS_YAML, "需要 pyyaml 验证 YAML 可解析")
     def test_block_is_valid_yaml_with_insert_shape(self):
         """YAML 解析后应得到 [{insert: [{id, name, config}]}]。"""
@@ -63,6 +72,8 @@ class PatchBlockTest(unittest.TestCase):
         self.assertEqual(inner["name"], "@deepseek-ai/dsh-mcp-client")
         self.assertEqual(inner["config"]["serverName"], "dataagent")
         self.assertEqual(inner["config"]["transport"], "stdio")
+        self.assertEqual(inner["config"]["cwd"], self.backend)
+        self.assertIn("mcp_servers/server.py", inner["config"]["args"][-1])
 
     def test_block_range_roundtrip(self):
         """upsert 幂等：已有新格式块时替换为同格式块，范围正确。"""

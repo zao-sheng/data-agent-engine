@@ -63,9 +63,13 @@ def find_profile() -> Path:
 def _patch_block(backend: str) -> str:
     """data-agent patch 块。
 
-    注意：patch 顶层条目的语义是「覆盖已存在的行」——目标 id 不存在时会被
-    loader 警告并静默跳过（entry "xxx" not found），新增插件实例必须用
-    `- insert:` 列表包裹（见 dsh-app-boot applyEntryPatches）。
+    注意：
+    1. patch 顶层条目的语义是「覆盖已存在的行」——目标 id 不存在时会被
+       loader 警告并静默跳过（entry "xxx" not found），新增插件实例必须用
+       `- insert:` 列表包裹（见 dsh-app-boot applyEntryPatches）。
+    2. mcp-client 的 stdio spawn 使用 host 进程的 cwd（DSH profile 目录，
+       不是 backend），所以脚本路径必须绝对化，并显式指定 cwd 指向
+       backend，避免 'mcp_servers/server.py' 找不到（Errno 2）。
     """
     uv = shutil.which("uv") or "uv"
     return f"""# --- data-agent engine (auto-managed by setup_dsh.py) ---
@@ -76,7 +80,8 @@ def _patch_block(backend: str) -> str:
         serverName: dataagent
         transport: stdio
         command: {uv}
-        args: ['run', '--project', '{backend}', 'python', 'mcp_servers/server.py']
+        args: ['run', '--project', '{backend}', 'python', '{backend}/mcp_servers/server.py']
+        cwd: '{backend}'
         env: {{ PYTHONUNBUFFERED: '1' }}
         toolCallTimeoutMs: 120000
 # --- end data-agent engine ---
