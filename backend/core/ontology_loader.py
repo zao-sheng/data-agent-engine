@@ -41,6 +41,43 @@ class Ontology:
         for r in self.relations:
             self.edges.setdefault(r["source"], []).append((r["target"], r["join_key"]))
 
+        # 指标族索引：family -> {variants: [指标名], default: 默认变体}
+        self.families: dict[str, dict] = {}
+        for f in raw_functions:
+            fam = f.get("family")
+            if fam:
+                entry = self.families.setdefault(fam, {"variants": [], "default": None})
+                entry["variants"].append(f["name"])
+                if f.get("default_of_family"):
+                    entry["default"] = f["name"]
+
+        # 业务黑话倒排索引：黑话(小写) -> {canonical, type, display}
+        # 只收录「真黑话/别名」（≠ 标准名自身）；归一目标 = 展示名（对象用中文 display_name）。
+        self.term_index: dict[str, dict] = {}
+        gloss = yaml.safe_load((base / "glossary.yaml").read_text()).get("glossary", []) \
+            if (base / "glossary.yaml").exists() else []
+
+        def display_of(canonical: str, t: str) -> str:
+            if t == "object":
+                return self.objects[canonical].get("display_name", canonical)
+            return canonical  # property / metric 用标准名
+
+        def add_term(term: str, canonical: str, t: str) -> None:
+            key = term.strip().lower()
+            disp = display_of(canonical, t)
+            if not key or key == disp.lower() or key == canonical.lower():
+                return  # 标准名自身不替换
+            self.term_index.setdefault(key, {"canonical": canonical, "type": t, "display": disp})
+
+        for g in gloss:
+            add_term(g["term"], g["canonical"], g["type"])
+        for o in raw_objects:
+            for a in o.get("aliases", []):
+                add_term(a, o["name"], "object")
+            for p in o.get("properties", []):
+                for a in p.get("aliases", []):
+                    add_term(a, p["name"], "property")
+
         # 物理名集合（物理表名 + 物理列名），供 MQL 物理渗入检测用。
         # 排除与业务指标名/属性名同名的条目（如 order_user_cnt 既是指标名也是物理列名）。
         self.physical_names: set[str] = set()
@@ -116,3 +153,24 @@ class Ontology:
 
     def alias_of(self, obj_name: str) -> str:
         return DIM_ALIAS.get(obj_name, obj_name[0].upper())
+
+    # ── 指标族 ──────────────────────────────────────────────
+    def family_variants(self, family: str) -> list[str]:
+        return list(self.families.get(family, {}).get("variants", []))
+
+    def family_default(self, family: str) -> str | None:
+        return self.families.get(family, {}).get("default")
+
+    # ── 术语归一 ─────────────────────────────────────────────
+    def normalize_terms(self, text: str) -> tuple[str, list[dict]]:
+        """业务黑话/别名 → 标准展示名（最长匹配，确定性）。
+        返回 (normalized_text, mappings[{raw, canonical, display, type}])。"""
+        norm, mappings = text, []
+        for term, info in sorted(self.term_index.items(), key=lambda kv: len(kv[0]), reverse=True):
+            low = norm.lower()
+            idx = low.find(term)
+            if idx >= 0:
+                norm = norm[:idx] + info["display"] + norm[idx + len(term):]
+                mappings.append({"raw": term, "canonical": info["canonical"],
+                                 "display": info["display"], "type": info["type"]})
+        return norm, mappings

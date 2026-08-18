@@ -9,14 +9,43 @@
 
 functions:
   - name: gmv
-    display_name: GMV
+    family: gmv
+    variant_label: 支付口径
+    display_name: GMV（支付口径）
     description: 有效支付金额合计（口径：is_valid=1 的支付单，不含退款冲减）
     owner: Payment
     formula: "SUM(pay_amount)"
     required_filters: ["is_valid = 1"]
+    default_of_family: true
     supported_dimensions: [channel, product_type, category, store_type, city, region_name, province, user_level, order_date]
     supported_granularities: [day, week, month, quarter, year]
-    do_not: "必须过滤 is_valid=1；不含退款冲减；GMV 取支付口径而非下单口径"
+    do_not: "必须过滤 is_valid=1；不含退款冲减；支付口径 ≠ 下单口径"
+    version: v1.0
+
+  - name: order_gmv
+    family: gmv
+    variant_label: 下单口径
+    display_name: GMV（下单口径）
+    description: 有效下单金额合计（口径：is_valid=1 的订单，未支付也算）
+    owner: Order
+    formula: "SUM(order_amount)"
+    required_filters: ["is_valid = 1"]
+    supported_dimensions: [product_type, category, store_type, city, region_name, province, order_status, order_date]
+    supported_granularities: [day, week, month, quarter, year]
+    do_not: "下单口径：下单金额（未支付也算），≠ 支付 GMV；必须过滤 is_valid=1"
+    version: v1.0
+
+  - name: consume_gmv
+    family: gmv
+    variant_label: 消费口径
+    display_name: GMV（消费口径）
+    description: 有效到店消费/核销金额合计
+    owner: Consume
+    formula: "SUM(consume_amount)"
+    required_filters: ["is_valid = 1"]
+    supported_dimensions: [product_type, category, store_type, city, region_name, province, order_date]
+    supported_granularities: [day, week, month, quarter, year]
+    do_not: "消费口径：核销金额，≠ 支付 GMV"
     version: v1.0
 
   - name: order_count

@@ -41,6 +41,26 @@ metrics: [{name: gmv}]
 filters: [{field: pay_amount, operator: gt, value: 100}]
 ```
 
+## 指标识别（多口径指标族，如 GMV 家族）
+
+同一业务语义可能有多个口径变体（pay_gmv/order_gmv/consume_gmv…）。识别规则（三级）：
+
+1. **精确命中**：用户明示口径（"支付 GMV"/"下单 GMV"/"消费 GMV"）→ 直接使用对应变体指标；
+2. **族默认**：用户只说族名（"GMV"）→ 先 `mcp__dataagent__metric_disambiguate` 查族默认口径
+   → 用默认变体（如 gmv=支付口径），并在 `mql_explain` 确认信息中**标注口径名**；
+3. **召回确认**：族无默认口径，或用户问"有哪几种口径" → 展示 `metric_disambiguate` 返回的
+   全部变体差异（公式/过滤/适用场景/is_default），`ask_user_question` 让用户选择。
+
+回答标注升级：**「指标名（口径名 + 版本：公式；必要过滤）」**，如
+`GMV（支付口径 v1.0：SUM(pay_amount)，过滤 is_valid=1）`——只标版本号不够，必须标口径。
+
+```yaml
+# 例：用户说"GMV 最近 30 天" → 族默认支付口径
+metrics: [{name: gmv}]        # gmv = 支付口径（default_of_family）
+# 例：用户说"下单 GMV 最近 30 天" → 精确命中下单口径
+metrics: [{name: order_gmv}]
+```
+
 ## 多指标（MQL v1.1，已支持）
 ```yaml
 metrics:

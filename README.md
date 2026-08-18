@@ -25,6 +25,8 @@ git clone <repo> && cd data-agent-engine
 | 三层口径一致 | 样例库的 DWS/ADS 由 DWD 聚合生成（模拟真实 ETL），同指标跨表结果一致 |
 | 多表关联聚合 | 事实表 × 维度表自动 JOIN（JOIN 键来自 Ontology relations，零猜测） |
 | 多指标 | 同域单表多列 + 跨域 CTE+FULL JOIN 对齐；无维度自动跨分区聚合（总和单行） |
+| 指标族（多口径） | 同族多口径（pay/order/consume GMV）三级识别：精确命中→族默认→召回确认；回答标注口径名 |
+| 业务黑话归一 | glossary 词典 + term_normalize 确定性归一（poi→门店、goods→产品）；回答回译用户用词 |
 | 表选择优化 | 预聚合表优先；维度不覆盖自动回落明细表；有行级权限自动排除无权限列的表 |
 | MQL 用户确认 | `mql_explain` 展示口径/维度/过滤/时间，确认后才翻译执行 |
 | 默认 t-1 | 未识别时间参数 → 默认查昨天，回答标注 |
@@ -51,7 +53,7 @@ DSH 侧（配置，零代码）                Python 侧（引擎）
 backend/
 ├── seed/          样例数据生成器（schema.sql + seed.py，固定种子）
 ├── builder/       本体半自动构建器（表结构 → Ontology YAML 骨架）
-├── ontology/      Ontology（objects/functions/relations/config；order 为示例主题）
+├── ontology/      Ontology（objects/functions/relations/glossary/config；order 为示例主题）
 ├── core/          确定性引擎（loader / validator / translator / executor）
 ├── mcp_servers/   FastMCP 入口（8 个工具）
 └── eval/          Golden Dataset + 评测门禁

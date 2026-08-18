@@ -1,0 +1,41 @@
+# ============================================================
+# 业务黑话词典：业务术语/黑话 → Ontology 标准术语（对象/指标/属性）
+# 用途：term_normalize 工具做确定性归一（OAG Step 0），
+#       让用户以任意说法提问都能映射到 Ontology 标准名。
+# 维护：业务团队直接维护本文件；新黑话反馈 → 增补条目（治理闭环）。
+# 约束：canonical 必须指向 Ontology 已注册的对象/指标/属性名。
+# ============================================================
+
+glossary:
+  # ── 对象级（门店）─────────────────────────────────────────
+  - {term: poi,      canonical: Store,      type: object}
+  - {term: shop,     canonical: Store,      type: object}
+  - {term: 门店,      canonical: Store,      type: object}
+  - {term: 店铺,      canonical: Store,      type: object}
+  - {term: 店面,      canonical: Store,      type: object}
+
+  # ── 对象级（产品）─────────────────────────────────────────
+  - {term: goods,    canonical: Product,    type: object}
+  - {term: item,     canonical: Product,    type: object}
+  - {term: sku,      canonical: Product,    type: object}
+  - {term: 商品,      canonical: Product,    type: object}
+  - {term: 货品,      canonical: Product,    type: object}
+
+  # ── 对象级（用户）─────────────────────────────────────────
+  - {term: customer, canonical: ActiveUser,  type: object}
+  - {term: 用户,      canonical: ActiveUser,  type: object}
+  - {term: 客户,      canonical: ActiveUser,  type: object}
+
+  # ── 属性级（金额口径）─────────────────────────────────────
+  - {term: paid_amount, canonical: pay_amount,   type: property}
+  - {term: 实付金额,     canonical: pay_amount,   type: property}
+  - {term: 支付金额,     canonical: pay_amount,   type: property}
+  - {term: 下单金额,     canonical: order_amount, type: property}
+  - {term: 消费金额,     canonical: consume_amount, type: property}
+  - {term: 退款金额,     canonical: refund_amount, type: property}
+
+  # ── 指标级（口径黑话）─────────────────────────────────────
+  - {term: 成交额,   canonical: gmv,    type: metric}
+  - {term: 销售额,   canonical: gmv,    type: metric}
+  - {term: 支付成交额, canonical: gmv,  type: metric}
+  - {term: 下单成交额, canonical: order_gmv, type: metric}

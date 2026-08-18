@@ -120,7 +120,8 @@ def mql_explain(mql: dict) -> dict:
         fn = _onto.get_function(name)
         metrics.append({"name": name, "display_name": fn["display_name"],
                         "formula": fn["formula"], "version": fn.get("version"),
-                        "owner": fn["owner"]})
+                        "owner": fn["owner"],
+                        "family": fn.get("family"), "variant_label": fn.get("variant_label")})
     def prop_display(p):
         o = _onto.owner_of(p)
         if o:
@@ -140,6 +141,73 @@ def mql_explain(mql: dict) -> dict:
             "time_range": time_desc,
             "time_defaulted": tr is None,
             "confirm_required": True}
+
+
+@mcp.tool()
+def metric_disambiguate(query: str) -> dict:
+    """指标歧义识别（多口径指标族）：精确命中 → 返回 exact；
+    命中指标族（如 GMV 有支付/下单/消费口径）→ 返回 family 全部变体及差异，供用户确认；
+    未命中 → 返回候选。"""
+    q = query.strip().lower()
+    exact = None
+    # ① 黑话命中（glossary 中 type=metric 的条目，如"成交额"→gmv）
+    ti = _onto.term_index.get(q)
+    if ti and ti["type"] == "metric":
+        exact = _onto.functions.get(ti["canonical"])
+    # ② 口径词优先（"支付GMV" → 支付口径变体）
+    if exact is None:
+        for f in _onto.functions.values():
+            vl = f.get("variant_label", "")
+            if vl and vl.replace("口径", "") in q:
+                exact = f
+                break
+    # ③ 精确指标名
+    if exact is None and q in _onto.functions:
+        exact = _onto.functions[q]
+    # ④ 族匹配
+    family = None
+    for fam, entry in _onto.families.items():
+        if fam in q or q in fam:
+            variants = []
+            for v in entry["variants"]:
+                f = _onto.functions[v]
+                variants.append({"name": v, "display_name": f["display_name"],
+                                 "formula": f["formula"],
+                                 "required_filters": f.get("required_filters", []),
+                                 "do_not": f.get("do_not", ""),
+                                 "is_default": v == entry["default"]})
+            family = {"name": fam, "default": entry["default"], "variants": variants}
+            break
+
+    if exact and family:
+        status = "both"
+    elif exact:
+        status = "exact"
+    elif family:
+        status = "family"
+    else:
+        status = "none"
+
+    out = {"status": status, "query": query}
+    if exact:
+        out["exact"] = {"name": exact["name"], "display_name": exact["display_name"],
+                        "formula": exact["formula"], "version": exact.get("version"),
+                        "variant_label": exact.get("variant_label"),
+                        "family": exact.get("family")}
+    if family:
+        out["family"] = family
+    if status == "none":
+        out["candidates"] = sorted(_onto.functions)
+    return out
+
+
+@mcp.tool()
+def term_normalize(text: str) -> dict:
+    """业务黑话/别名归一（OAG Step 0）：把用户问题中的黑话/别名
+    （如 poi/店铺→Store、goods/商品→Product）确定性地归一为 Ontology 标准术语。
+    返回 {normalized_text, mappings:[{raw, canonical, type}]}；回答时应按 mappings 回译用户用词。"""
+    norm, mappings = _onto.normalize_terms(text)
+    return {"normalized_text": norm, "mappings": mappings, "original": text}
 
 
 @mcp.tool()

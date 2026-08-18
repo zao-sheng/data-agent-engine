@@ -12,6 +12,7 @@ objects:
   # ── 下单域 ────────────────────────────────────────────────
   - name: Order
     display_name: 订单
+    aliases: [订单, 下单]
     description: 用户在平台产生的下单行为，统计订单量、下单金额的基础事实
     required_filters: ["is_valid = 1"]
     properties:
@@ -29,15 +30,16 @@ objects:
          granularities: [day], available_dims: [],
          field_mapping: {order_date: dt},
          pre_aggregated: {order_count: order_cnt, order_amount: order_amt,
-                          order_user_cnt: order_user_cnt}}
+                          order_user_cnt: order_user_cnt, order_gmv: order_amt}}
 
   # ── 支付域 ────────────────────────────────────────────────
   - name: Payment
     display_name: 支付
+    aliases: [支付]
     description: 用户对订单的支付行为，GMV 与客单价的统计口径来源
     required_filters: ["is_valid = 1"]
     properties:
-      - {name: pay_amount, type: decimal, unit: 元, description: 支付金额（含运费不含税）}
+      - {name: pay_amount, type: decimal, unit: 元, aliases: [支付金额, 实付金额, paid_amount], description: 支付金额（含运费不含税）}
       - {name: channel, type: string, description: 支付渠道 wechat/alipay/card}
       - {name: order_date, type: date, description: 支付日期（分区 dt）}
     source_tables:
@@ -62,6 +64,7 @@ objects:
   # ── 消费域 ────────────────────────────────────────────────
   - name: Consume
     display_name: 消费
+    aliases: [消费, 核销]
     description: 用户到店消费/核销行为，统计消费金额的基础事实
     required_filters: ["is_valid = 1"]
     properties:
@@ -76,11 +79,12 @@ objects:
          granularities: [day], available_dims: [],
          field_mapping: {order_date: dt},
          pre_aggregated: {consume_amount: consume_amt, consume_count: consume_cnt,
-                          consume_user_cnt: consume_user_cnt}}
+                          consume_user_cnt: consume_user_cnt, consume_gmv: consume_amt}}
 
   # ── 退款域 ────────────────────────────────────────────────
   - name: Refund
     display_name: 退款
+    aliases: [退款, 退货]
     description: 用户退款行为，统计退款金额的基础事实（退款表冗余 region_id/store_id）
     required_filters: ["is_valid = 1"]
     properties:
@@ -99,9 +103,10 @@ objects:
   # ── 维度对象 ──────────────────────────────────────────────
   - name: Product
     display_name: 产品
+    aliases: [产品, 商品, goods, item, sku]
     description: 产品维度，含产品类型与品类
     properties:
-      - {name: product_type, type: string, description: 产品类型 数码/家电/服饰/食品}
+      - {name: product_type, type: string, aliases: [产品类型], description: 产品类型 数码/家电/服饰/食品}
       - {name: category, type: string, description: 品类 如 手机/笔记本}
     source_tables:
       - {table: dim_product, layer: DIM, authority: gold, joinable: false,
@@ -110,10 +115,11 @@ objects:
 
   - name: Store
     display_name: 门店
+    aliases: [门店, 店铺, 店面, poi, shop]
     description: 门店维度，含门店类型与城市
     properties:
-      - {name: store_type, type: string, description: 门店类型 直营/加盟}
-      - {name: city, type: string, description: 门店所在城市}
+      - {name: store_type, type: string, aliases: [门店类型], description: 门店类型 直营/加盟}
+      - {name: city, type: string, aliases: [城市], description: 门店所在城市}
     source_tables:
       - {table: dim_store, layer: DIM, authority: gold, joinable: false,
          granularities: [], available_dims: [store_type, city],
@@ -121,9 +127,10 @@ objects:
 
   - name: Region
     display_name: 区域
+    aliases: [区域, 大区]
     description: 区域维度，含区域名/省/城市
     properties:
-      - {name: region_name, type: string, description: 大区 华东/华南/华北/西南/华中}
+      - {name: region_name, type: string, aliases: [区域名, 大区], description: 大区 华东/华南/华北/西南/华中}
       - {name: province, type: string, description: 省份}
     source_tables:
       - {table: dim_region, layer: DIM, authority: gold, joinable: false,
@@ -132,6 +139,7 @@ objects:
 
   - name: ActiveUser
     display_name: 活跃用户
+    aliases: [活跃用户, 用户, 客户, customer]
     description: 用户维度（dim_user 表）；活跃口径 v2.0=状态为 active 的用户
     default_version: v2.0
     properties:
