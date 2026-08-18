@@ -157,6 +157,7 @@ dsh-side/          setup_dsh.py + 「数据助理」预设模板 + 8 个 skills
 
 - [方案设计（修订版 v2.0）](DataAgent落地技术方案-修订版v2.0.md)
 - [落地指南（Python 版）](DSH实现DataAgent落地指南-Python版.md)
+- [代码解读报告（当前代码）](DataAgent代码解读报告.md)
 
 ## License
 
