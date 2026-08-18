@@ -26,6 +26,12 @@ class Ontology:
         raw_functions = yaml.safe_load((base / "functions.yaml").read_text())["functions"]
         self.relations = yaml.safe_load((base / "relations.yaml").read_text())["relations"]
 
+        # 全局配置（主题无关）：时间维度属性名 + 物理分区列名
+        cfg_path = base / "config.yaml"
+        cfg = yaml.safe_load(cfg_path.read_text()) if cfg_path.exists() else {}
+        self.time_dim: str = cfg.get("time_dimension", "order_date")
+        self.partition_col: str = cfg.get("partition_column", "dt")
+
         for o in raw_objects:
             self.objects[o["name"]] = o
             for p in o.get("properties", []):
@@ -34,6 +40,17 @@ class Ontology:
             self.functions[f["name"]] = f
         for r in self.relations:
             self.edges.setdefault(r["source"], []).append((r["target"], r["join_key"]))
+
+        # 物理名集合（物理表名 + 物理列名），供 MQL 物理渗入检测用。
+        # 排除与业务指标名/属性名同名的条目（如 order_user_cnt 既是指标名也是物理列名）。
+        self.physical_names: set[str] = set()
+        for o in raw_objects:
+            for t in o.get("source_tables", []):
+                self.physical_names.add(t["table"])
+                self.physical_names.update(t.get("field_mapping", {}).values())
+                self.physical_names.update(t.get("pre_aggregated", {}).values())
+        business_names = set(self.functions) | set(self.property_owner)
+        self.physical_names -= business_names
 
     # ── 基础查询 ────────────────────────────────────────────
     def get_object(self, name: str) -> dict | None:

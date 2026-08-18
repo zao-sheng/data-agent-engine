@@ -4,8 +4,11 @@
   1. ontology_search     —— OAG Step1/2：按名称/别名查对象、指标、属性
   2. ontology_traverse   —— OAG Step3：BFS 关系图扩展（join_key / required_filter / 公式）
   3. mql_validate        —— MQL 校验（安全边界：物理渗入检测）
-  4. semantic_translate  —— 确定性翻译：MQL → 可执行 SQL（含权限注入/表选择/默认 t-1）
-  5. execute_sql         —— 只读执行翻译出的 SQL，返回结果集
+  4. mql_explain         —— 把 MQL 转成人类可读的确认信息（用户在翻译执行前确认）
+  5. semantic_translate  —— 确定性翻译：MQL → 可执行 SQL（含权限注入/表选择/默认 t-1）
+  6. execute_sql         —— 只读执行翻译出的 SQL，返回结果集
+  7. ddl_generate        —— 路径 D：从 Ontology 对象生成建表 DDL（遵守分层命名规范）
+  8. scheduler_submit    —— 路径 D：提交调度任务（预留：待接入平台 mcp-scheduler）
 
 环境变量：
   DATA_AGENT_BACKEND —— backend 目录（默认取本文件上级的上级）
@@ -102,6 +105,81 @@ def semantic_translate(mql: dict, user: dict | None = None) -> dict:
 def execute_sql(sql: str) -> dict:
     """只读执行 SQL（仅 SELECT/CTE，禁写；行数上限 1000），返回结果集。"""
     return _executor.execute(sql)
+
+
+@mcp.tool()
+def mql_explain(mql: dict) -> dict:
+    """把 MQL 转成人类可读的确认信息。用户在 semantic_translate 执行【之前】用本工具
+    把即将查询的指标口径/维度/过滤/时间展示给用户确认。"""
+    v = _validator.validate(mql)
+    if not v["ok"]:
+        return {"ok": False, "validation": v}
+    metrics = []
+    for m in (mql.get("metrics") or [{"name": mql.get("metric")}]):
+        name = m["name"] if isinstance(m, dict) else m
+        fn = _onto.get_function(name)
+        metrics.append({"name": name, "display_name": fn["display_name"],
+                        "formula": fn["formula"], "version": fn.get("version"),
+                        "owner": fn["owner"]})
+    def prop_display(p):
+        o = _onto.owner_of(p)
+        if o:
+            for pp in _onto.objects[o].get("properties", []):
+                if pp["name"] == p:
+                    return pp.get("description") or p
+        return p
+    dims = [{"name": d["name"], "meaning": prop_display(d["name"]),
+             "granularity": d.get("granularity")}
+            for d in mql.get("dimensions", [])]
+    filters = [{"field": f["field"], "meaning": prop_display(f["field"]),
+                "operator": f["operator"], "value": f["value"]}
+               for f in mql.get("filters", [])]
+    tr = mql.get("time_range")
+    time_desc = (str(tr) if tr else "t-1（昨天，默认）")
+    return {"ok": True, "metrics": metrics, "dimensions": dims, "filters": filters,
+            "time_range": time_desc,
+            "time_defaulted": tr is None,
+            "confirm_required": True}
+
+
+@mcp.tool()
+def ddl_generate(obj_name: str, layer: str, domain: str = "ord",
+                 subject: str = None) -> dict:
+    """路径 D（ETL）：从 Ontology 对象生成建表 DDL 草稿，严格遵守数仓分层命名规范：
+    表名 = {layer}_{domain}_{subject}_{粒度后缀}（后缀：明细 _di、日汇总 _1d、月汇总 _1m）。
+    口径/类型以 Ontology 为准，生成后需人工 Review + 走审批。"""
+    o = _onto.get_object(obj_name)
+    if not o:
+        return {"error": f"对象 {obj_name} 不存在"}
+    subject = subject or obj_name.lower()
+    suffix = {"DWD": "_di", "DWS": "_1d", "ADS": "_1d", "DIM": ""}.get(layer.upper(), "_di")
+    table = f"{layer.lower()}_{domain}_{subject}{suffix}"
+    type_map = {"string": "VARCHAR(255)", "decimal": "DECIMAL(18,2)", "date": "DATE",
+                "int": "BIGINT", "bigint": "BIGINT", "integer": "BIGINT"}
+    cols = []
+    for p in o.get("properties", []):
+        cols.append(f"  {p['name']} {type_map.get(p.get('type'), 'STRING')} "
+                    f"COMMENT '{p.get('description', p['name'])}'")
+    for c in o.get("required_filters", []):
+        field = c.split(" ")[0]
+        if field not in {p["name"] for p in o.get("properties", [])}:
+            cols.append(f"  {field} BIGINT COMMENT '必要过滤标志 {c}'")
+    # 非 DIM 层统一加分区 dt + 主键
+    if layer.upper() != "DIM":
+        cols.append(f"  {_onto.partition_col} VARCHAR(8) NOT NULL COMMENT '分区 {_onto.partition_col}(yyyyMMdd)'")
+    ddl = (f"CREATE TABLE IF NOT EXISTS {table} (\n" + ",\n".join(cols) +
+           "\n) COMMENT '" + o.get("description", "") + "'\n" +
+           f"PARTITION BY RANGE({_onto.partition_col})();\n")
+    return {"table": table, "layer": layer.upper(), "domain": domain,
+            "subject": subject, "ddl": ddl, "review_required": True}
+
+
+@mcp.tool()
+def scheduler_submit(task_spec: dict) -> dict:
+    """路径 D（ETL）：提交调度任务（**预留**）。当前未接入公司调度平台 MCP（mcp-scheduler），
+    接入后在此补充核心逻辑：任务依赖、调度周期（cron）、告警通道、幂等键。"""
+    return {"error": "调度配置未接入平台 MCP（预留）。"
+                     "接入 mcp-scheduler 后：提交任务依赖/周期/告警，带幂等键。"}
 
 
 if __name__ == "__main__":

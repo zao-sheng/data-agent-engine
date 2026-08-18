@@ -1,0 +1,5 @@
+# Ontology 全局配置（换主题域时改这里，引擎代码零改动）
+#   time_dimension   —— 时间维度【业务属性名】（MQL 里 dimensions 用它，如 order_date / trade_date / biz_date）
+#   partition_column —— 事实表【物理分区列名】（默认 dt，格式 'YYYYMMDD'）
+time_dimension: order_date
+partition_column: dt

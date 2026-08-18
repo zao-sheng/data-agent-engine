@@ -41,5 +41,13 @@ metrics: [{name: gmv}]
 filters: [{field: pay_amount, operator: gt, value: 100}]
 ```
 
-## 多指标
-v1.1 多指标暂未启用（翻译引擎返回明确错误）——拆分为多个单指标查询，或先问用户优先看哪个。
+## 多指标（MQL v1.1，已支持）
+```yaml
+metrics:
+  - {name: gmv}
+  - {name: avg_order_amount}
+  - {name: pay_count}
+```
+- **同域多指标**（如 GMV + 客单价，都属支付）→ 引擎自动合并到单表多列；
+- **跨域多指标**（如 GMV + 退款金额，分属支付/退款）→ 引擎自动 CTE + FULL JOIN 对齐共同维度；
+- 无维度时返回单行总和（自动跨分区聚合）。

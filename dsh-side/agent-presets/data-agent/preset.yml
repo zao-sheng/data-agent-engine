@@ -1,2 +1,2 @@
 name: 数据助理
-description: order 主题数据查询 Agent：OAG 理解 → MQL → 确定性翻译 → SQL 执行 → 口径标注回答。基于 Python 引擎（MCP 接入），样例库开箱即用。
+description: 通用企业 Data Agent：先规划（意图分类+路径选择）→ 对应路径执行（A 取数 / C Skill / B 兜底 / D ETL）→ MQL 用户确认 → 确定性翻译 → 口径标注回答。Python 引擎（MCP 接入），order 交易主题为内置示例，可替换主题域。

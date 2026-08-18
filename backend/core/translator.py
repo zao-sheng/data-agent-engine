@@ -95,7 +95,7 @@ class Translator:
         metric_names = [m["name"] for m, _ in items]
         gran = self._granularity(mql)
         needed = ({d["name"] for d in mql.get("dimensions", [])}
-                  | {f["field"] for f in mql.get("filters", [])}) - {"order_date"}
+                  | {f["field"] for f in mql.get("filters", [])}) - {self.onto.time_dim}
         perm_rids = user.get("region_ids")
 
         best_t, mode, joins = self._select_table_multi(owner, metric_names, needed, gran, perm_rids)
@@ -251,7 +251,7 @@ class Translator:
     # ── 表/粒度/维度 ────────────────────────────────────────
     def _granularity(self, mql: dict) -> str:
         for d in mql.get("dimensions", []):
-            if d.get("name") == "order_date":
+            if d.get("name") == self.onto.time_dim:
                 return d.get("granularity", "day")
         return "day"
 
@@ -293,8 +293,8 @@ class Translator:
 
     def _dim_expr(self, d: dict, fact_obj: str, fact_table: str, best_t: dict) -> tuple[str, str]:
         name = d["name"]
-        if name == "order_date":
-            return self._time_group_expr(d.get("granularity", "day")), "order_date"
+        if name == self.onto.time_dim:
+            return self._time_group_expr(d.get("granularity", "day")), self.onto.time_dim
         owner = self.onto.owner_of(name)
         if owner is None:
             raise TranslateError(f"维度 {name} 不是注册属性")
@@ -347,20 +347,20 @@ class Translator:
     def _time_sql(self, time_range, dialect: str) -> str:
         alias = "F"
         if not time_range:
-            return f"{alias}.dt = {self._expr('yesterday', dialect)}"
+            return f"{alias}.{self.onto.partition_col} = {self._expr('yesterday', dialect)}"
         if isinstance(time_range, str):
-            return f"{alias}.dt = {self._expr(time_range, dialect)}"
+            return f"{alias}.{self.onto.partition_col} = {self._expr(time_range, dialect)}"
         if "day" in time_range:
-            return f"{alias}.dt = {self._expr(time_range['day'], dialect)}"
+            return f"{alias}.{self.onto.partition_col} = {self._expr(time_range['day'], dialect)}"
         start, end = time_range.get("start"), time_range.get("end")
         if start and end:
-            return (f"{alias}.dt >= {self._expr(start, dialect)} "
-                    f"AND {alias}.dt <= {self._expr(end, dialect)}")
+            return (f"{alias}.{self.onto.partition_col} >= {self._expr(start, dialect)} "
+                    f"AND {alias}.{self.onto.partition_col} <= {self._expr(end, dialect)}")
         if start:
-            return f"{alias}.dt >= {self._expr(start, dialect)}"
+            return f"{alias}.{self.onto.partition_col} >= {self._expr(start, dialect)}"
         if end:
-            return f"{alias}.dt <= {self._expr(end, dialect)}"
-        return f"{alias}.dt = {self._expr('yesterday', dialect)}"
+            return f"{alias}.{self.onto.partition_col} <= {self._expr(end, dialect)}"
+        return f"{alias}.{self.onto.partition_col} = {self._expr('yesterday', dialect)}"
 
     def _time_desc(self, time_range) -> str:
         if not time_range:
@@ -403,13 +403,13 @@ class Translator:
         raise TranslateError(f"无法解析时间表达式: {x}")
 
     def _time_group_expr(self, gran: str, dialect: str = "sqlite") -> str:
-        dt = "F.dt"
+        dt = f"F.{self.onto.partition_col}"
         if dialect == "doris":
             return {"day": dt,
-                    "week": "DATE_FORMAT(F.dt,'%x-W%v')",
-                    "month": "DATE_FORMAT(F.dt,'%Y-%m')",
-                    "quarter": "CONCAT(SUBSTR(F.dt,1,4),'-Q',CEIL(CAST(SUBSTR(F.dt,5,2) AS INT)/3))",
-                    "year": "SUBSTR(F.dt,1,4)"}[gran]
+                    "week": f"DATE_FORMAT({dt},'%x-W%v')",
+                    "month": f"DATE_FORMAT({dt},'%Y-%m')",
+                    "quarter": f"CONCAT(SUBSTR({dt},1,4),'-Q',CEIL(CAST(SUBSTR({dt},5,2) AS INT)/3))",
+                    "year": f"SUBSTR({dt},1,4)"}[gran]
         return {"day": dt,
                 "week": f"substr({dt},1,4) || '-W' || printf('%02d', iso_week({dt}))",
                 "month": f"substr({dt},1,4) || '-' || substr({dt},5,2)",

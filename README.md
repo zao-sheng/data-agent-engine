@@ -20,12 +20,17 @@ git clone <repo> && cd data-agent-engine
 
 | 能力 | 说明 |
 |------|------|
-| 分层数仓模拟 | 15 张表：DWD（下单/支付/消费/退款明细）× 4、DWS 日汇总 × 4、ADS 应用汇总 × 3、DIM 维度 × 4；统一 `dt`（'YYYYMMDD'）分区 |
-| 三层口径一致 | 样例库的 DWS/ADS 由 DWD 聚合生成（模拟真实 ETL），同指标跨表结果一致，评测可验证 |
-| 多表关联聚合 | 如「华东区数码 GMV 按门店城市」→ 事实表 × dim_product × dim_store × dim_region 自动 JOIN（JOIN 键来自 Ontology relations，零猜测） |
-| 表选择优化 | 预聚合表（ads/dws）优先；维度不覆盖时自动回落明细表；行级权限存在时自动排除无权限列的表 |
-| 默认 t-1 | 未识别时间参数 → 默认查询昨天，回答自动标注 |
-| 安全边界 | MQL 物理渗入检测（dwd_/dws_/pay_amt 等一律拒绝）；只读执行器（禁写、行数上限） |
+| 先规划后执行 | Plan（意图分类 L1-L4 + 路径选择）→ A 取数 / C Skill / B 兜底 / D ETL 四条路径各有 skill |
+| 分层数仓模拟 | 15 张表：DWD × 4、DWS × 4、ADS × 3、DIM × 4；统一 `dt`（'YYYYMMDD'）分区 |
+| 三层口径一致 | 样例库的 DWS/ADS 由 DWD 聚合生成（模拟真实 ETL），同指标跨表结果一致 |
+| 多表关联聚合 | 事实表 × 维度表自动 JOIN（JOIN 键来自 Ontology relations，零猜测） |
+| 多指标 | 同域单表多列 + 跨域 CTE+FULL JOIN 对齐；无维度自动跨分区聚合（总和单行） |
+| 表选择优化 | 预聚合表优先；维度不覆盖自动回落明细表；有行级权限自动排除无权限列的表 |
+| MQL 用户确认 | `mql_explain` 展示口径/维度/过滤/时间，确认后才翻译执行 |
+| 默认 t-1 | 未识别时间参数 → 默认查昨天，回答标注 |
+| ETL（路径 D） | `ddl_generate` 已实现（遵守命名规范）；调度 `scheduler_submit` 预留待接平台 MCP |
+| 安全边界 | MQL 物理渗入检测（精确物理名集合）；只读执行器（禁写、行数上限） |
+| 主题可替换 | 引擎零主题耦合：时间维度名/分区列名由 `ontology/config.yaml` 配置 |
 | 评测门禁 | Golden Dataset 回归，通过率 ≥ 90% 才放行（CI 已配置） |
 
 ## 架构
@@ -34,10 +39,11 @@ git clone <repo> && cd data-agent-engine
 DSH 侧（配置，零代码）                Python 侧（引擎）
 ┌──────────────────────────┐   MCP    ┌──────────────────────────────┐
 │ 数据助理 preset           │ ──────▶ │ mcp_servers/server.py        │
-│  persona + 3 个 skills    │  stdio   │  ├ ontology_search/traverse  │
-│  dsh-mcp-client           │          │  ├ mql_validate（安全边界）  │
+│  persona + 8 个 skills    │  stdio   │  ├ ontology_search/traverse  │
+│  dsh-mcp-client           │          │  ├ mql_validate/explain     │
 └──────────────────────────┘          │  ├ semantic_translate（翻译） │
-                                      │  └ execute_sql（只读执行）    │
+                                      │  ├ execute_sql（只读执行）    │
+                                      │  └ ddl_generate / scheduler  │
                                       └──────────────────────────────┘
 ```
 
@@ -45,20 +51,34 @@ DSH 侧（配置，零代码）                Python 侧（引擎）
 backend/
 ├── seed/          样例数据生成器（schema.sql + seed.py，固定种子）
 ├── builder/       本体半自动构建器（表结构 → Ontology YAML 骨架）
-├── ontology/      order 主题本体（objects/functions/relations）
+├── ontology/      Ontology（objects/functions/relations/config；order 为示例主题）
 ├── core/          确定性引擎（loader / validator / translator / executor）
-├── mcp_servers/   FastMCP 入口
+├── mcp_servers/   FastMCP 入口（8 个工具）
 └── eval/          Golden Dataset + 评测门禁
-dsh-side/          setup_dsh.py + 「数据助理」预设模板
+dsh-side/          setup_dsh.py + 「数据助理」预设模板 + 8 个 skills
 ```
 
 ## 二次开发
 
+### 换主题域（order 只是示例）
+引擎零主题耦合，换主题 = 替换 `backend/ontology/` 四份文件，代码不动：
+1. `config.yaml`：改 `time_dimension`（时间维度属性名）与 `partition_column`（分区列名）；
+2. `objects.yaml` / `functions.yaml` / `relations.yaml`：填新主题的对象/指标/关系；
+3. 替换样例数据：新写 `seed/`（或用 `builder/build_ontology.py` 从真实库生成骨架后人工补全）；
+4. 跑评测门禁。
+> 内置 order 交易主题（下单/支付/消费/退款 + 产品/门店/区域/用户）是「可运行示例」，替换后即为你的领域。
+
 ### 换真实数仓
-1. 配置连接：替换 `core/executor.py` 的 SQLite 实现为你的驱动（SQL 不变，方言在翻译引擎处理）；
+1. 配置连接：覆盖 `core/executor.py` 的 `_execute_remote`（SQL 不变，方言在翻译引擎处理）；
 2. 生成本体骨架：`uv run --project backend python -m builder.build_ontology --sqlite <库>`；
 3. 🔴 人工补全：对象 `description`、指标 `formula`/口径/版本、relations `join_key` 核对；
 4. 填 Golden Dataset 并跑门禁：`uv run --project backend python -m eval.eval`。
+
+### 接入 ETL 平台能力（路径 D）
+- `ddl_generate` 已实现（本地，遵守 `warehouse-standards` 命名规范）；
+- `scheduler_submit` 为**预留占位**：接入公司调度平台 MCP（mcp-scheduler）后，在
+  `mcp_servers/server.py` 的 `scheduler_submit` 里补充核心逻辑（任务依赖/周期/告警/幂等键）；
+- ETL 代码模板与沙箱建表执行随平台能力逐步补齐。
 
 ### 加指标
 编辑 `backend/ontology/functions.yaml`（formula 只允许 SUM/COUNT/AVG/MAX/MIN/DISTINCT + 属性名），
