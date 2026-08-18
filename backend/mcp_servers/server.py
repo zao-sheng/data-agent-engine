@@ -92,13 +92,15 @@ def mql_validate(mql: dict) -> dict:
 
 
 @mcp.tool()
-def semantic_translate(mql: dict, user: dict | None = None) -> dict:
+def semantic_translate(mql: dict, user: dict | None = None, dialect: str = "sqlite") -> dict:
     """确定性翻译引擎：MQL → 可执行 SQL。含行级权限注入（user.region_ids）、
-    表选择（预聚合/明细+多表 JOIN）、required_filter、默认时间 t-1。零 LLM。"""
+    表选择（预聚合/明细+多表 JOIN）、required_filter、默认时间 t-1。零 LLM。
+    dialect: sqlite（默认，已实现已测试）/ doris（预留映射，仅翻译不执行，
+    返回的 metadata.dialect_verified=false，执行前需接入 _execute_remote）。"""
     result = _validator.validate(mql)
     if not result["ok"]:
         return {"error": "MQL 校验失败", "validation": result}
-    return _translator.translate(mql, user or {}, dialect="sqlite")
+    return _translator.translate(mql, user or {}, dialect=dialect)
 
 
 @mcp.tool()
@@ -235,7 +237,8 @@ def ddl_generate(obj_name: str, layer: str, domain: str = "ord",
     # 非 DIM 层统一加分区 dt + 主键
     if layer.upper() != "DIM":
         cols.append(f"  {_onto.partition_col} VARCHAR(8) NOT NULL COMMENT '分区 {_onto.partition_col}(yyyyMMdd)'")
-    ddl = (f"CREATE TABLE IF NOT EXISTS {table} (\n" + ",\n".join(cols) +
+    ddl = (f"-- Doris 风格 DDL（目标引擎 Doris；其他引擎需在方言适配层转换）\n"
+           f"CREATE TABLE IF NOT EXISTS {table} (\n" + ",\n".join(cols) +
            "\n) COMMENT '" + o.get("description", "") + "'\n" +
            f"PARTITION BY RANGE({_onto.partition_col})();\n")
     return {"table": table, "layer": layer.upper(), "domain": domain,

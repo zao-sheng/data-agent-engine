@@ -31,6 +31,9 @@ OP_SQL = {"eq": "=", "neq": "<>", "gt": ">", "gte": ">=", "lt": "<", "lte": "<="
 
 GRAN_UP = {"week", "month", "quarter", "year"}
 
+# 方言验证状态：sqlite 已实现且评测覆盖；doris 为预留映射（未启用、未验证）
+DIALECT_VERIFIED = {"sqlite": True, "doris": False}
+
 
 class TranslateError(Exception):
     pass
@@ -76,6 +79,7 @@ class Translator:
             "time_range": self._time_desc(mql.get("time_range")),
             "granularity": self._granularity(mql),
             "dialect": dialect,
+            "dialect_verified": DIALECT_VERIFIED.get(dialect, False),
         })
         return {"sql": sql, "metadata": meta}
 
@@ -109,7 +113,7 @@ class Translator:
         # 维度列 + GROUP BY
         group_exprs: list[str] = []
         for d in mql.get("dimensions", []):
-            expr, alias = self._dim_expr(d, owner, fact_table, best_t)
+            expr, alias = self._dim_expr(d, owner, fact_table, best_t, dialect)
             select.append(f"{expr} AS {alias}")
             group_exprs.append(expr)
 
@@ -291,10 +295,11 @@ class Translator:
             raise TranslateError("公式中出现物理表名")
         return formula
 
-    def _dim_expr(self, d: dict, fact_obj: str, fact_table: str, best_t: dict) -> tuple[str, str]:
+    def _dim_expr(self, d: dict, fact_obj: str, fact_table: str, best_t: dict,
+                  dialect: str = "sqlite") -> tuple[str, str]:
         name = d["name"]
         if name == self.onto.time_dim:
-            return self._time_group_expr(d.get("granularity", "day")), self.onto.time_dim
+            return self._time_group_expr(d.get("granularity", "day"), dialect), self.onto.time_dim
         owner = self.onto.owner_of(name)
         if owner is None:
             raise TranslateError(f"维度 {name} 不是注册属性")
@@ -377,6 +382,7 @@ class Translator:
     @staticmethod
     def _expr(x, dialect: str) -> str:
         if dialect == "doris":
+            # ⚠️ 预留映射：未启用、未验证，仅供接入 Doris 时参考（需在真实 Doris 上回归）
             rel = {"today": "DATE_FORMAT(CURDATE(),'%Y%m%d')",
                    "yesterday": "DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 DAY),'%Y%m%d')",
                    "last_month_start": "DATE_FORMAT(DATE_SUB(DATE_FORMAT(CURDATE(),'%Y-%m-01'), INTERVAL 1 MONTH),'%Y%m%d')",
@@ -405,6 +411,7 @@ class Translator:
     def _time_group_expr(self, gran: str, dialect: str = "sqlite") -> str:
         dt = f"F.{self.onto.partition_col}"
         if dialect == "doris":
+            # ⚠️ 预留映射：未启用、未验证，仅供接入 Doris 时参考（需在真实 Doris 上回归）
             return {"day": dt,
                     "week": f"DATE_FORMAT({dt},'%x-W%v')",
                     "month": f"DATE_FORMAT({dt},'%Y-%m')",

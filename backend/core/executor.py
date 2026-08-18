@@ -31,14 +31,20 @@ class Executor:
     """只读执行器。默认 SQLite；真实数仓通过覆盖 `_execute_remote` 接入。"""
 
     def __init__(self, dsn: str, dialect: str = "sqlite"):
+        """dsn: 数据介质（SQLite 文件路径 / 真实数仓连接串）
+        dialect: SQL 方言（sqlite 已实现；doris 等需接 _execute_remote）"""
         self.dsn = dsn
         self.dialect = dialect
 
     def execute(self, sql: str) -> dict:
         if FORBIDDEN.search(sql):
             return {"error": "只读执行器拒绝非查询语句"}
-        if self.dialect == "sqlite" or self.dsn.endswith(".db"):
+        if self.dialect == "sqlite":
             return self._execute_sqlite(sql)
+        if self.dsn.endswith(".db"):
+            # dialect（SQL 方言）与介质（SQLite 文件）解耦：非 sqlite 方言不能拿 SQLite 硬跑
+            return {"error": f"方言 {self.dialect} 与 SQLite 介质不匹配："
+                             f"{self.dialect} 执行未实现，请接入 _execute_remote（真实数仓驱动）"}
         return self._execute_remote(sql)
 
     # ── SQLite 实现 ──────────────────────────────────────────

@@ -86,6 +86,7 @@ git clone <repo> && cd data-agent-engine
 | 安全边界 | MQL 物理渗入检测（精确物理名集合）；只读执行器（禁写、行数上限） |
 | 主题可替换 | 引擎零主题耦合：时间维度名/分区列名由 `ontology/config.yaml` 配置 |
 | 评测门禁 | Golden Dataset 回归，通过率 ≥ 90% 才放行（CI 已配置） |
+| 方言状态 | SQLite 已实现已测试（样例库）；**Doris 方言映射为预留**（仅翻译不执行，`dialect_verified=false`，接入 `_execute_remote` 后启用） |
 
 ## 架构
 
