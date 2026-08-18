@@ -95,11 +95,14 @@ def run(out: Path, seed: int = 42, days: int = 90) -> Path:
                           rng.choices(USER_LEVELS, weights=[60, 25, 10, 5])[0],
                           d(reg)))
     conn.executemany("INSERT INTO dim_user VALUES (?,?,?,?)", user_rows)
-    user_status = {r[0]: r[1] for r in user_rows}
 
     # ── 2. DWD 明细事实表（近 90 天）───────────────────────────
     order_rows, pay_rows, consume_rows, refund_rows = [], [], [], []
     order_id = pay_id = consume_id = refund_id = 0
+
+    # 预构建索引，避免循环内 O(n) 扫描
+    store_ids = [s[0] for s in store_rows]
+    store_region = {s[0]: s[4] for s in store_rows}
 
     for i in range(days):
         day = first + timedelta(days=i)
@@ -109,8 +112,8 @@ def run(out: Path, seed: int = 42, days: int = 90) -> Path:
         for _ in range(n_orders):
             uid = f"U{rng.randint(1, 500):06d}"
             pid, pt, cat = rng.choice(products)
-            sid = rng.choice(store_rows)[0]
-            rid = next(s[4] for s in store_rows if s[0] == sid)   # 门店所属区域
+            sid = rng.choice(store_ids)
+            rid = store_region[sid]                       # O(1) 查门店所属区域
             amt = round(rng.uniform(20, 3000), 2)
             valid = 1 if rng.random() < 0.9 else 0
 

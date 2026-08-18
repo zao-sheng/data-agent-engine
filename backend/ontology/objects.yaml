@@ -44,7 +44,7 @@ objects:
       - {table: dwd_ord_pay_di, layer: DWD, authority: gold, joinable: true, perm_column: region_id,
          granularities: [day, week, month, quarter, year],
          available_dims: [channel],
-         field_mapping: {order_id: order_id, user_id: user_id, pay_amount: pay_amt,
+         field_mapping: {pay_id: pay_id, order_id: order_id, user_id: user_id, pay_amount: pay_amt,
                          channel: channel, order_date: dt}}
       - {table: dws_ord_pay_1d, layer: DWS, authority: silver, joinable: false, perm_column: region_id,
          granularities: [day], available_dims: [],

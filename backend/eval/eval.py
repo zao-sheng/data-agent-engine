@@ -51,13 +51,26 @@ def main() -> int:
             r = translator.translate(mql, user or {}, dialect="sqlite")
             if "error" in r:
                 raise AssertionError(f"翻译失败: {r['error']}")
-            if r["metadata"]["fact_table"] != case["expect_table"]:
+            if case.get("expect_multi"):
+                if not r["metadata"].get("multi_table"):
+                    raise AssertionError("期望多表合并（multi_table）")
+                got = set(r["metadata"].get("metrics", []))
+                if not got >= set(case.get("expect_metrics", [])):
+                    raise AssertionError(f"指标缺失: 期望 {case['expect_metrics']}，实际 {sorted(got)}")
+            elif case.get("expect_table") and r["metadata"]["fact_table"] != case["expect_table"]:
                 raise AssertionError(f"表选择错误: 期望 {case['expect_table']}，实际 {r['metadata']['fact_table']}")
             res = executor.execute(r["sql"])
             if "error" in res:
                 raise AssertionError(f"SQL 执行失败: {res['error']}")
-            if res["row_count"] <= case.get("expect_rows_gt", 0):
+            if case.get("expect_rows_eq") is not None:
+                if res["row_count"] != case["expect_rows_eq"]:
+                    raise AssertionError(f"结果行数 {res['row_count']} ≠ 期望 {case['expect_rows_eq']}")
+            elif res["row_count"] <= case.get("expect_rows_gt", 0):
                 raise AssertionError(f"结果为空（期望 > {case.get('expect_rows_gt', 0)} 行）")
+            # 多指标断言：结果列必须包含全部指标名
+            for m in case.get("expect_metrics", []):
+                if m not in res.get("columns", []):
+                    raise AssertionError(f"结果缺少指标列 {m}")
             passed += 1
         except AssertionError as e:
             failed.append((i, case["question"], str(e)))

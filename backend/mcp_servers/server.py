@@ -15,7 +15,11 @@ from __future__ import annotations
 
 import os
 import sys
+import warnings
 from pathlib import Path
+
+# mcp 1.x 依赖 pydantic-settings 的已知无害告警，启动时静默
+warnings.filterwarnings("ignore", message=".*incomplete definition.*")
 
 # 无论以何种方式启动（uv run / 直接 python），都保证能 import core
 BACKEND_ROOT = Path(__file__).resolve().parent.parent

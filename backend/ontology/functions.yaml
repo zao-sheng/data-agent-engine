@@ -41,6 +41,17 @@ functions:
     do_not: "不要直接 AVG(pay_amount)，需先按订单去重再计算"
     version: v2.0
 
+  - name: pay_count
+    display_name: 支付笔数
+    description: 有效支付单数
+    owner: Payment
+    formula: "COUNT(pay_id)"
+    required_filters: ["is_valid = 1"]
+    supported_dimensions: [channel, product_type, category, store_type, city, region_name, province, order_date]
+    supported_granularities: [day, week, month, quarter, year]
+    do_not: ""
+    version: v1.0
+
   - name: consume_amount
     display_name: 消费金额
     description: 有效到店消费/核销金额合计
