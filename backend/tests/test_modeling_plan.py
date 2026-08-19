@@ -123,13 +123,36 @@ class ModelingWorkflowEditabilityTest(unittest.TestCase):
 
     def test_editable_phase_1(self):
         text = self.SKILL.read_text(encoding="utf-8")
-        self.assertIn("逐项确认/编辑", text)
+        # 阶段 1 方案书：清单确认协议 + 可编辑
+        self.assertIn("可编辑清单", text)
+        self.assertIn("整体确认", text)
+        self.assertIn("要修改的变更项", text)
 
     def test_paired_generation_phase(self):
         text = self.SKILL.read_text(encoding="utf-8")
         self.assertIn("modeling_plan", text)
         self.assertIn("配对", text)
         self.assertIn("summary.paired", text)
+
+    def test_confirm_list_protocol_present(self):
+        """清单确认协议：先输出完整清单（编号）→ 一次整体确认，禁止逐项弹选择题。"""
+        text = self.SKILL.read_text(encoding="utf-8")
+        self.assertIn("清单确认协议", text)
+        self.assertIn("整体确认", text)
+        self.assertIn("编号 + 新内容", text)
+        self.assertIn("禁止", text)
+        self.assertIn("多次单问选择题", text)
+        self.assertIn("ask_user_question", text)
+
+    def test_editable_list_present_in_phases(self):
+        """阶段 0 需求表、阶段 1 方案书均为可编辑清单。"""
+        text = self.SKILL.read_text(encoding="utf-8")
+        self.assertIn("建模需求识别表（草稿，可编辑）", text)
+        self.assertIn("来源", text)
+        self.assertIn("用户input", text)
+        self.assertIn("待确认", text)
+        # 阶段 1 方案书可编辑
+        self.assertIn("可编辑清单", text)
 
 
 if __name__ == "__main__":
