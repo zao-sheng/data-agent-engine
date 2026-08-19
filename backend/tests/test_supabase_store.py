@@ -62,7 +62,7 @@ class SupabaseStoreReadTest(unittest.TestCase):
 
     @mock.patch("core.ontology_store._supabase_client")
     def test_load_matches_yaml_data(self, mock_client):
-        mock_client.return_value.get.side_effect = _fake_get
+        mock_client.return_value.return_value.get.side_effect = _fake_get
         data = self.store.load()
 
         y = YamlOntologyStore(ONTOLOGY_DIR).load()
@@ -77,7 +77,7 @@ class SupabaseStoreReadTest(unittest.TestCase):
 
     @mock.patch("core.ontology_store._supabase_client")
     def test_ontology_built_from_supabase_behaves_like_yaml(self, mock_client):
-        mock_client.return_value.get.side_effect = _fake_get
+        mock_client.return_value.return_value.get.side_effect = _fake_get
         s_onto = Ontology(store=self.store)
         y_onto = Ontology(ONTOLOGY_DIR)
         self.assertEqual(s_onto.get_function("gmv"), y_onto.get_function("gmv"))
@@ -87,10 +87,10 @@ class SupabaseStoreReadTest(unittest.TestCase):
 
     @mock.patch("core.ontology_store._supabase_client")
     def test_select_filters_deleted(self, mock_client):
-        mock_client.return_value.get.side_effect = _fake_get
+        mock_client.return_value.return_value.get.side_effect = _fake_get
         self.store.load()
         # 业务表带 is_deleted=eq.false；config（无该列）不带，避免 42703
-        calls = mock_client.return_value.get.call_args_list
+        calls = mock_client.return_value.return_value.get.call_args_list
         biz = [c for c in calls if "ontology_config" not in c.args[0]]
         cfg = [c for c in calls if "ontology_config" in c.args[0]]
         self.assertTrue(biz, "应有业务表请求")
@@ -112,47 +112,55 @@ class SupabaseWriterTest(unittest.TestCase):
     def setUp(self):
         self.w = SupabaseOntologyWriter("https://x.supabase.co", "key")
 
-    @mock.patch("core.ontology_store._supabase_client")
-    def test_upsert_object_payload(self, mock_client):
+    @mock.patch("core.ontology_store.urllib.request.urlopen")
+    def test_upsert_object_payload(self, mock_urlopen):
+        """writer 用 urllib：验证 URL 含 on_conflict、payload revision+1。"""
         resp = mock.Mock()
-        resp.raise_for_status = lambda: None
-        mock_client.return_value.post.return_value = resp
+        resp.status = 201
+        mock_urlopen.return_value.__enter__.return_value = resp
         self.w.upsert_object({"name": "NewObj", "display_name": "新对象",
                               "revision": 3}, user="alice")
-        args = mock_client.return_value.post.call_args
-        url = args.args[0]
-        payload = args.kwargs["json"][0]
-        headers = args.kwargs["headers"]
-        self.assertTrue(url.endswith("/rest/v1/ontology_objects"))
+        req = mock_urlopen.call_args.args[0]
+        self.assertIn("on_conflict=name", req.full_url)
+        self.assertEqual(req.method, "POST")
+        import json
+        payload = json.loads(req.data.decode())[0]
         self.assertEqual(payload["revision"], 4)          # 乐观锁 +1
         self.assertEqual(payload["updated_by"], "alice")
-        self.assertIn("resolution=merge-duplicates", headers["Prefer"])
-        self.assertIn("Content-Profile", headers)
+        self.assertIn("resolution=merge-duplicates", req.headers["Prefer"])
 
-    @mock.patch("core.ontology_store._supabase_client")
-    def test_update_object_revision_conflict(self, mock_client):
-        # 模拟 PATCH 命中 0 行（204 无 body）→ 冲突
+    @mock.patch("core.ontology_store.urllib.request.urlopen")
+    def test_upsert_table_payload(self, mock_urlopen):
+        """upsert_table 走 on_conflict=table_name。"""
         resp = mock.Mock()
-        resp.raise_for_status = lambda: None
-        resp.status_code = 204
-        mock_client.return_value.patch.return_value = resp
+        resp.status = 201
+        mock_urlopen.return_value.__enter__.return_value = resp
+        self.w.upsert_table({"table_name": "dwd_x", "layer": "DWD"})
+        req = mock_urlopen.call_args.args[0]
+        self.assertIn("on_conflict=table_name", req.full_url)
+
+    @mock.patch("core.ontology_store.urllib.request.urlopen")
+    def test_update_object_revision_conflict(self, mock_urlopen):
+        """PATCH 命中 0 行（204）→ 冲突。"""
+        from urllib.error import HTTPError
+        mock_urlopen.side_effect = HTTPError("", 204, "no content", None, None)
         ok = self.w.update_object_if_revision("Order", {"name": "Order"},
                                               expected_revision=5, user="alice")
         self.assertFalse(ok)  # 他人已改，revision 5 不存在 → 冲突
 
-    @mock.patch("core.ontology_store._supabase_client")
-    def test_update_object_revision_ok(self, mock_client):
+    @mock.patch("core.ontology_store.urllib.request.urlopen")
+    def test_update_object_revision_ok(self, mock_urlopen):
+        """PATCH 命中（200 带 body）→ 成功；请求带 revision 条件。"""
         resp = mock.Mock()
-        resp.raise_for_status = lambda: None
-        resp.status_code = 200
-        resp.json.return_value = [{"id": 1}]
-        mock_client.return_value.patch.return_value = resp
+        resp.status = 200
+        resp.read.return_value = b'[{"id": 1}]'
+        mock_urlopen.return_value.__enter__.return_value = resp
         ok = self.w.update_object_if_revision("Order", {"name": "Order"},
                                               expected_revision=5, user="alice")
         self.assertTrue(ok)
-        # 请求带 revision 条件
-        params = mock_client.return_value.patch.call_args.kwargs["params"]
-        self.assertEqual(params["revision"], "eq.5")
+        req = mock_urlopen.call_args.args[0]
+        self.assertIn("revision=eq.5", req.full_url)
+        self.assertEqual(req.method, "PATCH")
 
 
 class NormalizeRowsTest(unittest.TestCase):

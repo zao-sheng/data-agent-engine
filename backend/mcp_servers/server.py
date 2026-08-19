@@ -52,6 +52,7 @@ from core.intent import classify_intent  # noqa: E402
 from core.metadata import MetadataService  # noqa: E402
 from core.modeling_plan import generate_modeling_plan  # noqa: E402
 from core.ontology_store import TableMetadataStore, create_store  # noqa: E402
+from core.table_metadata import collect_metadata_from_entry  # noqa: E402
 from core.ontology_writer import create_writer, writer_supports  # noqa: E402
 from core.query_token import QueryTokenStore  # noqa: E402
 from core.runtime_log import log_error, log_info, log_warn, setup_runtime_logger  # noqa: E402
@@ -498,9 +499,14 @@ def ontology_register(kind: str, entry: dict, user: str = "") -> dict:
       * sqlite   —— 只读产物，拒绝写入（提示写 YAML 后重新编译）
     必须在用户确认后调用（modeling-workflow 阶段 2 本体注册）；返回落库结果。"""
     kind = kind.lower()
+    tables_meta: list[dict] = []
     try:
         if kind == "object":
             _writer.upsert_object(entry)
+            # 自动采集关联表的元数据（路径 D：建好本体同时采好表元数据）
+            tables_meta = collect_metadata_from_entry(str(DB), _onto, entry)
+            if tables_meta and CONFIG.ontology_store == "supabase":
+                _writer.upsert_tables(tables_meta, user=user)
         elif kind == "function":
             _writer.upsert_function(entry)
         elif kind == "relation":
@@ -515,12 +521,21 @@ def ontology_register(kind: str, entry: dict, user: str = "") -> dict:
             return {"error": f"不支持的注册类型: {kind}（支持 object/function/relation/glossary/config）"}
     except Exception as e:  # noqa: BLE001
         return {"error": f"本体注册失败: {e}"}
-    # 注册成功后自动重载本体：当前会话后续查询立即使用最新本体
-    reload = _reload_ontology()
+    # 注册成功后自动重载本体：当前会话后续查询立即使用最新本体。
+    # reload 仅刷新内存本体，失败不应掩盖已成功的注册（网络抖动时可稍后 ontology_reload）。
+    try:
+        reload = _reload_ontology()
+        reloaded, reload_note = True, "注册成功并已重载本体"
+    except Exception as e:  # noqa: BLE001
+        reload, reloaded, reload_note = {}, False, f"注册成功，但重载本体失败（{e}），可稍后调用 ontology_reload"
     return {"ok": True, "kind": kind, "entry": entry,
             "store": CONFIG.ontology_store,
-            "reloaded": reload,
-            "note": "注册成功并已重载本体；如使用 Supabase 多人编辑，建议 ontology_export 导出 YAML 走评审"}
+            "reloaded": reloaded,
+            "tables_metadata": {"collected": len(tables_meta),
+                                "synced": CONFIG.ontology_store == "supabase" and bool(tables_meta)},
+            "note": reload_note + "；关联表元数据已自动采集"
+                    + ("并入库 ontology_tables" if tables_meta and CONFIG.ontology_store == "supabase"
+                       else "（yaml/sqlite 模式不写库）")}
 
 
 @mcp.tool()

@@ -60,7 +60,7 @@ class TableMetadataStoreTest(unittest.TestCase):
     """TableMetadataStore：mock PostgREST 返回，验证行→结构转换。"""
 
     def _fake_client(self, row: dict | None):
-        """构造返回固定行的 fake requests。"""
+        """构造返回固定行的 fake client 工厂（匹配 _supabase_client()(url,key,schema).get）。"""
         class FakeResp:
             def raise_for_status(self):
                 pass
@@ -68,12 +68,13 @@ class TableMetadataStoreTest(unittest.TestCase):
                 return [row] if row else []
 
         class FakeGet:
+            def __init__(self, *a, **k):
+                pass
             def get(self, path, params=None, headers=None):
                 return FakeResp()
 
         import core.ontology_store as os_mod
-        return mock.patch.object(os_mod, "_supabase_client",
-                                 return_value=FakeGet())
+        return mock.patch.object(os_mod, "_supabase_client", return_value=FakeGet)
 
     def test_table_info_parses_row(self):
         row = {
@@ -117,8 +118,9 @@ class MetadataFallbackTest(unittest.TestCase):
             def raise_for_status(self): pass
             def json(self): return [store_row]
         class FakeGet:
+            def __init__(self, *a, **k): pass
             def get(self, path, params=None, headers=None): return FakeResp()
-        with mock.patch.object(os_mod, "_supabase_client", return_value=FakeGet()):
+        with mock.patch.object(os_mod, "_supabase_client", return_value=FakeGet):
             tstore = TableMetadataStore("https://x", "k")
             svc = MetadataService(ONTOLOGY, db_path=str(DB), tables_store=tstore)
             info = svc.table_info("ads_ord_gmv_1d")

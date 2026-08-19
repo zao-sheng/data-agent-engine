@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -230,13 +232,38 @@ def normalize_rows(rows: list[dict], keys: tuple[str, ...]) -> list[dict]:
     return out
 
 
+class _UrllibGetClient:
+    """urllib 实现的轻量 GET client（兼容 requests 的 .get(path, params, headers)）。"""
+
+    def __init__(self, url: str, key: str, schema: str = "public"):
+        self.url = url.rstrip("/")
+        self.key = key
+        self.schema = schema
+
+    def get(self, path: str, params: dict | None = None, headers: dict | None = None):
+        qs = "&".join(f"{k}={v}" for k, v in (params or {}).items())
+        full = f"{self.url}{path}" + (f"?{qs}" if qs else "")
+        req = urllib.request.Request(full, headers={
+            "apikey": self.key, "Authorization": f"Bearer {self.key}",
+            "Accept-Profile": self.schema, **(headers or {})})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                body = resp.read().decode()
+        except urllib.error.HTTPError as e:
+            body = e.read().decode()
+            raise RuntimeError(f"GET {path} 失败: HTTP {e.code} {body[:200]}") from e
+
+        class _Resp:
+            def raise_for_status(self):
+                return None
+            def json(self):
+                return json.loads(body)
+        return _Resp()
+
+
 def _supabase_client() -> Any:
-    """按需 import requests（避免强制依赖）。"""
-    try:
-        import requests  # noqa: F401
-        return requests
-    except ImportError:
-        raise ImportError("缺少 requests 依赖：uv pip install --python backend/.venv/bin/python requests")
+    """返回 urllib 实现的 GET client（零额外依赖，克隆即跑）。"""
+    return _UrllibGetClient  # 由调用方传 url/key/schema 实例化
 
 
 class SupabaseOntologyStore:
@@ -270,8 +297,8 @@ class SupabaseOntologyStore:
         # meta/config 是纯键值表，无该列（加了会 42703 报错）
         if table not in ("ontology_meta", "ontology_config"):
             params["is_deleted"] = "eq.false"
-        r = _supabase_client().get(
-            f"{self.url}/rest/v1/{table}",
+        r = _supabase_client()(self.url, self.key, self.schema).get(
+            f"/rest/v1/{table}",
             params=params,
             headers={"apikey": self.key, "Authorization": f"Bearer {self.key}",
                      "Accept-Profile": self.schema})
@@ -304,7 +331,10 @@ class SupabaseOntologyStore:
 
 
 class SupabaseOntologyWriter:
-    """本体写入（多人编辑/建模流程落地）。revision 乐观锁防冲突。"""
+    """本体写入（多人编辑/建模流程落地）。revision 乐观锁防冲突。
+
+    用 urllib（标准库，零额外依赖）——requests 非必需，克隆即跑。
+    """
 
     def __init__(self, url: str, key: str, schema: str = "public"):
         self.url = url.rstrip("/")
@@ -315,17 +345,30 @@ class SupabaseOntologyWriter:
         return {"apikey": self.key, "Authorization": f"Bearer {self.key}",
                 "Content-Profile": self.schema, "Accept-Profile": self.schema}
 
+    # 每张表的 upsert 冲突键（on_conflict）——对应建表时的唯一约束
+    CONFLICT_KEY = {
+        "ontology_objects": "name",
+        "ontology_functions": "name",
+        "ontology_relations": "source,target,join_key",
+        "ontology_glossary": "term",
+        "ontology_config": "key",
+        "ontology_tables": "table_name",
+    }
+
     def _upsert_row(self, table: str, row: dict, user: str = "") -> None:
         """upsert 单行（按唯一键合并），更新 revision+updated_by+updated_at。"""
         payload = dict(row)
         payload["revision"] = payload.get("revision", 1) + 1
         payload["updated_by"] = user
-        r = _supabase_client().post(
-            f"{self.url}/rest/v1/{table}",
-            json=[payload],
+        url = f"{self.url}/rest/v1/{table}?on_conflict={self.CONFLICT_KEY[table]}"
+        req = urllib.request.Request(
+            url, data=json.dumps([payload]).encode(), method="POST",
             headers={**self._headers(),
+                     "Content-Type": "application/json",
                      "Prefer": "resolution=merge-duplicates,return=minimal"})
-        r.raise_for_status()
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            if resp.status not in (200, 201, 204):
+                raise RuntimeError(f"upsert {table} 失败: HTTP {resp.status}")
 
     def upsert_object(self, obj: dict, user: str = "") -> None:
         self._upsert_row("ontology_objects", obj, user)
@@ -343,6 +386,15 @@ class SupabaseOntologyWriter:
         self._upsert_row("ontology_config",
                          {"key": key, "value": json.dumps(value, ensure_ascii=False)}, user)
 
+    def upsert_table(self, table: dict, user: str = "") -> None:
+        """写入/更新 ontology_tables（表元数据，幂等按 table_name）。"""
+        self._upsert_row("ontology_tables", table, user)
+
+    def upsert_tables(self, tables: list[dict], user: str = "") -> None:
+        """批量写入 ontology_tables（路径 D 落地后自动采集）。"""
+        for t in tables:
+            self.upsert_table(t, user)
+
     # ── 乐观锁冲突检测（可选：PATCH 带 revision 条件）─────────
     def update_object_if_revision(self, name: str, obj: dict, expected_revision: int,
                                   user: str = "") -> bool:
@@ -350,14 +402,17 @@ class SupabaseOntologyWriter:
         payload = dict(obj)
         payload["revision"] = expected_revision + 1
         payload["updated_by"] = user
-        r = _supabase_client().patch(
-            f"{self.url}/rest/v1/ontology_objects",
-            params={"name": f"eq.{name}", "revision": f"eq.{expected_revision}",
-                    "is_deleted": "eq.false"},
-            json=payload, headers=self._headers())
-        r.raise_for_status()
-        # return=minimal 时 204 表示命中 0 行（冲突）；200 带 body 表示成功
-        return r.status_code == 200 and bool(r.json())
+        url = (f"{self.url}/rest/v1/ontology_objects"
+               f"?name=eq.{name}&revision=eq.{expected_revision}&is_deleted=eq.false")
+        req = urllib.request.Request(url, data=json.dumps(payload).encode(), method="PATCH",
+                                     headers={**self._headers(), "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return resp.status == 200 and bool(resp.read().decode())
+        except urllib.error.HTTPError as e:
+            if e.code == 204:  # 命中 0 行 → 冲突
+                return False
+            raise
 
 
 class TableMetadataStore:
@@ -375,8 +430,8 @@ class TableMetadataStore:
 
     def _select_one(self, table_name: str) -> dict | None:
         try:
-            r = _supabase_client().get(
-                f"{self.url}/rest/v1/ontology_tables",
+            r = _supabase_client()(self.url, self.key, self.schema).get(
+                f"/rest/v1/ontology_tables",
                 params={"select": "*", "table_name": f"eq.{table_name}",
                         "is_deleted": "eq.false"},
                 headers={"apikey": self.key, "Authorization": f"Bearer {self.key}",

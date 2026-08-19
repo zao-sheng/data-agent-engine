@@ -87,26 +87,27 @@ def _granularity_of(table: str, layer: str) -> str:
     return "明细_原子"
 
 
-def collect_table_metadata(db: Path | str, onto: Ontology) -> list[dict]:
-    """从样例库 + Ontology 提取 15 张表元数据。"""
-    conn = sqlite3.connect(db)
-    tables = [r[0] for r in conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' "
-        "AND name NOT LIKE 'sqlite_%' ORDER BY name")]
-    conn.close()
+def _collect_one(db: Path | str, onto: Ontology, t: str,
+                 entry: dict | None = None) -> dict:
+    """采集单张表元数据（样例库有则 PRAGMA，无则从对象属性推导）。
 
-    out: list[dict] = []
-    for t in tables:
-        layer = _layer_of(t)
-        parts = t.split("_")
-        domain = parts[1] if len(parts) > 1 and layer != "DIM" else (
-            parts[1] if len(parts) > 1 else "")
-        subject = parts[2] if len(parts) > 2 else (parts[1] if len(parts) > 1 else "")
+    entry: 可选——注册中的对象 dict（新表未建时从中取 field_mapping+properties）。
+    """
+    layer = _layer_of(t)
+    parts = t.split("_")
+    domain = parts[1] if len(parts) > 1 and layer != "DIM" else (
+        parts[1] if len(parts) > 1 else "")
+    subject = parts[2] if len(parts) > 2 else (parts[1] if len(parts) > 1 else "")
+
+    # 字段：样例库 PRAGMA 优先；表不存在时从对象属性推导
+    fields = []
+    try:
         conn = sqlite3.connect(db)
-        pk_cols = {r[5] for r in conn.execute(f"PRAGMA table_info({t})") if r[5] > 0}
         cols = conn.execute(f"PRAGMA table_info({t})").fetchall()
         conn.close()
-        fields = []
+    except sqlite3.Error:
+        cols = []
+    if cols:
         for cid, name, ctype, notnull, dflt, pk in cols:
             fields.append({
                 "name": name,
@@ -117,21 +118,93 @@ def collect_table_metadata(db: Path | str, onto: Ontology) -> list[dict]:
                 "is_pk": bool(pk),
                 "is_partition": name == "dt",
             })
-        partition_col = "dt" if layer != "DIM" else ""
-        out.append({
-            "table_name": t,
-            "layer": layer,
-            "domain": domain or "ord",
-            "subject": subject or "",
-            "description": TABLE_DESC.get(t, ""),
-            "granularity": _granularity_of(t, layer),
-            "partition_col": partition_col,
-            "owner_object": TABLE_OWNER.get(t),
-            "fields": fields,
-            "lineage": LINEAGE.get(t, {"source": "", "logic": "贴源/维表（无聚合加工）"}),
-            "readiness": "T+1",
-        })
+    else:
+        # 表尚未建（路径 D 新表）：优先用注册 entry 的 field_mapping 推导
+        obj = None
+        fm = None
+        if entry is not None:
+            obj = entry
+            for st in entry.get("source_tables", []):
+                if st["table"] == t:
+                    fm = st.get("field_mapping", {})
+                    break
+        else:
+            owner = TABLE_OWNER.get(t)
+            if owner and owner in onto.objects:
+                obj = onto.objects[owner]
+                for st in obj.get("source_tables", []):
+                    if st["table"] == t:
+                        fm = st.get("field_mapping", {})
+                        break
+        if fm and obj:
+            for p in obj.get("properties", []):
+                col = fm.get(p["name"], p["name"])
+                fields.append({
+                    "name": col,
+                    "type": "TEXT",  # 未建表时类型未知，按业务属性 type 映射
+                    "description": p.get("description", ""),
+                    "is_pk": False,
+                    "is_partition": col == "dt",
+                })
+
+    partition_col = "dt" if layer != "DIM" else ""
+    return {
+        "table_name": t,
+        "layer": layer,
+        "domain": domain or "ord",
+        "subject": subject or "",
+        "description": TABLE_DESC.get(t, ""),
+        "granularity": _granularity_of(t, layer),
+        "partition_col": partition_col,
+        "owner_object": TABLE_OWNER.get(t),
+        "fields": fields,
+        "lineage": LINEAGE.get(t, {"source": "", "logic": "贴源/维表（无聚合加工）"}),
+        "readiness": "T+1",
+    }
+
+
+def collect_table_metadata(db: Path | str, onto: Ontology) -> list[dict]:
+    """从样例库 + Ontology 提取全部表元数据（样例库中存在的表）。"""
+    conn = sqlite3.connect(db)
+    tables = [r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' "
+        "AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+    conn.close()
+    return [_collect_one(db, onto, t) for t in tables]
+
+
+def collect_metadata_from_entry(db: Path | str, onto: Ontology,
+                                obj_entry: dict) -> list[dict]:
+    """按对象 entry 采集其 source_tables 的表元数据（路径 D 注册对象后自动联动）。
+
+    直接基于注册的 entry（不依赖 Ontology 已含该对象），表已建采真实字段、
+    未建从 entry 的 field_mapping 推导。
+    """
+    tables = [t["table"] for t in obj_entry.get("source_tables", [])]
+    out = []
+    for t in tables:
+        meta = _collect_one(db, onto, t, entry=obj_entry)
+        # 用 entry 补充归属对象与描述（新对象不在 TABLE_OWNER 时）
+        if not meta["owner_object"]:
+            meta["owner_object"] = obj_entry.get("name")
+        if not meta["description"]:
+            meta["description"] = obj_entry.get("description", "")
+        out.append(meta)
     return out
+
+
+def collect_metadata_for_object(db: Path | str, onto: Ontology,
+                                obj_name: str) -> list[dict]:
+    """按对象采集其 source_tables 的表元数据（路径 D 注册对象后自动联动）。
+
+    表已建（样例库）→ PRAGMA 采真实字段；
+    表未建（路径 D 新表）→ 从对象属性 + field_mapping 推导字段。
+    """
+    o = onto.get_object(obj_name)
+    if not o:
+        return []
+    tables = [t["table"] for t in o.get("source_tables", [])]
+    return [_collect_one(db, onto, t) for t in tables]
 
 
 def main() -> int:
