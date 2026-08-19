@@ -2,7 +2,7 @@
 
 设计：建模流程（modeling-workflow 阶段 2 本体注册）在用户确认后调用
 `register_*` 系列写入。写入目标由 `DATA_AGENT_ONTOLOGY_STORE` 决定：
-  * yaml    —— 写 backend/ontology/*.yaml（Git 评审流，单机）
+  * yaml    —— 写 backend/ontology/*.yaml（发布基线快照，单机）
   * supabase—— 写 Supabase 表（多人编辑真源）
   * sqlite  —— 只读编译产物，不支持写入（需先回灌 YAML 再编译）
 
@@ -29,7 +29,7 @@ YAML_FILE_BY_FIELD = {
 
 
 class YamlOntologyWriter:
-    """写 YAML 文件（默认：Git 评审源）。"""
+    """写 YAML 文件（默认：发布基线快照源）。"""
 
     def __init__(self, base: Path | str):
         self.base = Path(base)

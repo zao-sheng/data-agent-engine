@@ -36,7 +36,7 @@ git clone <repo> && cd data-agent-engine
 | Supabase 多人编辑 | `./install.sh --supabase` | 云端 Supabase（schema.sql 建表 + import 导入） | 团队共同维护本体 |
 
 **yaml vs supabase 怎么选**：单机用 yaml（零依赖、克隆即跑）；团队多人共同编辑指标口径/
-表映射时用 supabase（直写 DB + revision 乐观锁 + export 评审副本闭环）。
+表映射时用 supabase（直写 DB + revision 乐观锁；本体维护在可视化系统 + 内置审批流，Git 中 YAML 仅作发布基线快照）。
 
 ## 能力一览
 
@@ -146,7 +146,7 @@ dsh-side/          setup_dsh.py + 「数据助理」预设模板 + 8 个 skills
 - [建模流程规范](dsh-side/agent-presets/data-agent/skills/modeling-workflow/SKILL.md)
 - [环境变量配置说明](backend/.env.example)
 - [本体存储模式对比（yaml vs sqlite vs supabase 选型）](docs/ontology-store-modes.md)
-- [Git 评审闭环方案（Supabase 多人编辑 → PR 评审）](docs/git-review-flow.md)
+
 
 ## License
 

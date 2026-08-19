@@ -2,7 +2,7 @@
 
 设计动机（为 Supabase 铺路）：
   * Ontology（ontology_loader）只关心「原始数据 → 索引」——数据源可以是
-    YAML 文件（Git 评审源）、SQLite 编译缓存（发布产物）、Supabase（多人编辑真源）
+    YAML 文件（发布基线快照）、SQLite 编译缓存（发布产物）、Supabase（多人编辑真源）
   * 换存储只实现一个新 Store 子类，Ontology 与全部调用方（translator /
     validator / metadata / intent / server 工具）零改动
   * 读取接口统一返回 `OntologyData`（原始 YAML 结构的 dict），索引构建复用
@@ -38,7 +38,7 @@ class OntologyStore(Protocol):
     def load(self) -> OntologyData: ...
 
 
-# ── YamlStore（默认：Git 评审源）─────────────────────────────
+# ── YamlStore（默认：发布基线快照源）─────────────────────────
 class YamlOntologyStore:
     """从 backend/ontology/*.yaml 读取（默认实现，clone 即跑、零依赖）。"""
 

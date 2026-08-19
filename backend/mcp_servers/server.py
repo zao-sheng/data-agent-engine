@@ -65,7 +65,7 @@ setup_runtime_logger(CONFIG.log_dir, level=CONFIG.log_level,
                      max_bytes=CONFIG.audit_max_bytes,
                      backup_count=CONFIG.audit_backup_count)
 
-# 本体存储（1A/1B/2）：默认 YAML（Git 评审源）；opt-in SQLite 编译产物
+# 本体存储（1A/1B/2）：默认 YAML（发布基线快照）；opt-in SQLite 编译产物
 # （DATA_AGENT_ONTOLOGY_STORE=sqlite）或 Supabase 真源（=supabase，多人编辑）
 _onto = Ontology(store=create_store(CONFIG.ontology_store,
                                     base=CONFIG.ontology_dir,
@@ -483,7 +483,7 @@ def ontology_register(kind: str, entry: dict, user: str = "") -> dict:
     kind: object | function | relation | glossary | config
     entry: 与 YAML 条目结构一致的 dict（object 需 name、function 需 name+formula+owner…）
     写入目标由 DATA_AGENT_ONTOLOGY_STORE 决定：
-      * yaml     —— 写 backend/ontology/*.yaml（Git 评审流，单机）
+      * yaml     —— 写 backend/ontology/*.yaml（发布基线快照，单机）
       * supabase —— 写 Supabase 表（多人编辑真源，revision 乐观锁）
       * sqlite   —— 只读产物，拒绝写入（提示写 YAML 后重新编译）
     必须在用户确认后调用（modeling-workflow 阶段 2 本体注册）；返回落库结果。"""

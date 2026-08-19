@@ -1,20 +1,16 @@
-"""本体导出工具：Supabase（真源）→ YAML（Git 评审副本），支持一键 PR。
+"""本体导出工具：Supabase（真源）→ YAML（发布基线快照）。
+
+定位：本体元数据维护发生在可视化系统（Web 界面 + 内置审批流），
+Git 中的 YAML 只是「发布基线的审计快照」——用于追溯/回滚/对外交付，
+不承担评审职责（评审在可视化系统的审批流里完成）。
 
 用法：
-  # 仅导出 YAML（评审副本）
+  # 仅导出 YAML（发布基线快照）
   python -m ontology_export --url <URL> --key <KEY> --out backend/ontology
 
-  # 导出 + 建分支 + 提交 + 推送（Git 仓库内）
+  # 导出 + 建分支 + 提交 + 推送（可选：提交基线快照留痕，Git 仓库内）
   python -m ontology_export --url <URL> --key <KEY> \
-      --out backend/ontology --branch ontology/update-20260101
-
-  # 导出 + 建分支 + 提交 + 推送 + 创建 PR（需 gh CLI）
-  python -m ontology_export --url <URL> --key <KEY> \
-      --out backend/ontology --branch b --pr \
-      --title "本体更新: 新增XX指标" --body "变更说明..."
-
-闭环：管理端直写 Supabase → 本工具导出 YAML → 提交 PR 评审 →
-     评审通过合并（可选：ontology_compile 编译 SQLite 作为发布基线）。
+      --out backend/ontology --branch ontology/snapshot-20260101
 """
 from __future__ import annotations
 
@@ -89,25 +85,14 @@ def create_pr_branch(repo: Path, branch: str) -> tuple[bool, str]:
     return True, f"已推送分支 {branch}"
 
 
-def create_github_pr(repo: Path, branch: str, title: str, body: str) -> tuple[bool, str]:
-    """用 gh CLI 创建 PR。返回 (ok, url_or_msg)。"""
-    r = _run(["gh", "pr", "create", "--base", "main",
-              "--head", branch, "--title", title, "--body", body], repo)
-    if r.returncode != 0:
-        return False, f"gh pr create 失败: {r.stderr.strip()}"
-    return True, r.stdout.strip()
-
-
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Supabase 本体 → YAML 导出（可一键 PR）")
+    ap = argparse.ArgumentParser(description="Supabase 本体 → YAML 导出（发布基线快照）")
     ap.add_argument("--url", default=None, help="Supabase URL（默认读环境变量）")
     ap.add_argument("--key", default=None, help="Supabase key（默认读环境变量）")
     ap.add_argument("--out", default="ontology", help="输出 YAML 目录")
     ap.add_argument("--schema", default="public")
-    ap.add_argument("--branch", default=None, help="导出一并建分支提交推送（Git 评审）")
-    ap.add_argument("--pr", action="store_true", help="推送后创建 PR（需 gh CLI + --branch）")
-    ap.add_argument("--title", default="本体更新（来自 Supabase 导出）", help="PR 标题")
-    ap.add_argument("--body", default="由 ontology_export 自动导出评审", help="PR 描述")
+    ap.add_argument("--branch", default=None,
+                    help="导出一并建分支提交推送（基线快照留痕，可选）")
     a = ap.parse_args()
 
     import os
@@ -125,10 +110,8 @@ def main() -> int:
     print(f"   objects={len(data.objects)} functions={len(data.functions)} "
           f"relations={len(data.relations)} glossary={len(data.glossary)}")
 
-    # 2. 可选：建分支提交推送 + PR
+    # 2. 可选：建分支提交推送（基线快照留痕）
     if a.branch:
-        repo = Path(a.out).resolve().parent.parent  # ontology 目录的上级上级（仓库根）
-        # 更稳：往上找 .git
         cur = Path(a.out).resolve()
         while not (cur / ".git").exists() and cur.parent != cur:
             cur = cur.parent
@@ -139,14 +122,8 @@ def main() -> int:
         ok, msg = create_pr_branch(repo, a.branch)
         if not ok:
             print(f"⚠️ {msg}")
-            return 2 if a.pr else 0
+            return 2
         print(f"✅ {msg}")
-        if a.pr:
-            ok, msg2 = create_github_pr(repo, a.branch, a.title, a.body)
-            if not ok:
-                print(f"⚠️ {msg2}")
-                return 3
-            print(f"✅ PR 已创建: {msg2}")
     return 0
 
 

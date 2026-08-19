@@ -1,4 +1,4 @@
-"""本体导入工具：YAML（Git 评审源）→ Supabase（多人编辑真源）。
+"""本体导入工具：YAML（发布基线快照）→ Supabase（多人编辑真源）。
 
 用法：
   python -m ontology_import --yaml backend/ontology \

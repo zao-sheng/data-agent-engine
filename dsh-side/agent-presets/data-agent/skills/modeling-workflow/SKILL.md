@@ -113,7 +113,7 @@ description: 建模全流程规范（路径 D）。从需求文档提取建模�
 4. **本体注册（双通道）**：变更清单中 type=register 的项 →
    调用 `mcp__dataagent__ontology_register`（kind=object/function/relation/glossary/
    config，entry=YAML 条目结构）→ 展示注册项清单（编号）→ 一次整体确认 → 写入。
-   - 写入目标由 `DATA_AGENT_ONTOLOGY_STORE` 决定：yaml=Git 评审文件 /
+   - 写入目标由 `DATA_AGENT_ONTOLOGY_STORE` 决定：yaml=发布基线文件 /
      supabase=多人编辑真源（revision 乐观锁）；
    - Supabase 模式注册后建议 `ontology_export` 导出 YAML 走评审闭环；
    - sqlite 是只读产物，拒绝写入（提示写 YAML 后重新 `ontology_compile`）。

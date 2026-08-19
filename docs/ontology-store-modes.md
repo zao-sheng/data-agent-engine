@@ -19,15 +19,15 @@
 
 | 维度 | yaml | sqlite | supabase |
 |------|------|--------|----------|
-| **角色** | Git 评审源（手写/评审） | 编译产物（发布基线） | 多人编辑真源（source of truth） |
+| **角色** | 发布基线快照源（单机维护） | 编译产物（发布基线） | 多人编辑真源（source of truth） |
 | **数据位置** | `backend/ontology/*.yaml` | `backend/ontology.db` | 云端 Supabase（5 张表） |
 | **可写** | ✅ 手写 / `ontology_register` | ❌ 只读（写 YAML 后重新编译） | ✅ 多人直写（revision 乐观锁） |
-| **Git 评审** | ✅ 天然（文件 diff） | ❌ 二进制 | ⚠️ 需 `ontology_export` 导出 YAML 走 PR |
+| **可视化审批** | ✅ 文件即基线（可追溯） | ❌ 二进制 | ✅ 可视化系统审批流 + `ontology_export` 出基线快照 |
 | **多人协作** | ❌ 文件冲突 | ❌ | ✅ 直写 DB + 乐观锁防覆盖 |
 | **依赖** | pyyaml（内置） | sqlite3（内置） | requests + 你的 Supabase 实例 |
 | **冷启动** | 快（当前 19KB 无感） | 更快（预构建索引） | 需网络（首次拉取） |
 | **离线可用** | ✅ | ✅ | ❌（需网络） |
-| **适用** | 单机 / 评审基线 | 发布产物 / CI 验证 | 团队共同维护本体 |
+| **适用** | 单机 / 基线快照 | 发布产物 / CI 验证 | 团队共同维护本体（可视化系统+审批流） |
 
 ---
 
@@ -45,7 +45,7 @@
 
 ### yaml（默认）
 ```
-编辑 backend/ontology/*.yaml →（Git 提交评审）→ 引擎启动读 YAML → 内存索引
+编辑 backend/ontology/*.yaml →（提交 Git 留痕）→ 引擎启动读 YAML → 内存索引
 ```
 
 ### sqlite（编译产物）
@@ -79,7 +79,7 @@ dsh web
 管理端/建模流程（用户确认后）→ ontology_register（写 Supabase，乐观锁）
   → 自动 reload（当前会话立即用最新本体）
 其他成员 → ontology_reload（刷新）
-评审 → ontology_export（Supabase → YAML 提交 PR）
+审批（可视化系统内置审批流）→ ontology_export（Supabase → YAML 发布基线快照）
 CI → ontology_sync_check（YAML ↔ Supabase 一致性）
 ```
 
@@ -90,9 +90,9 @@ CI → ontology_sync_check（YAML ↔ Supabase 一致性）
 | 操作 | 影响 |
 |------|------|
 | yaml → sqlite | 引擎读产物；本体变更流程变「改 YAML → 编译」（编译可在 CI/install 自动） |
-| yaml → supabase | 引擎读云端；本体变更流程变「ontology_register 直写 DB」；评审走 export |
+| yaml → supabase | 引擎读云端；本体变更流程变「可视化系统 + ontology_register 直写 DB」 |
 | sqlite → yaml | 直接切回（读 YAML） |
-| supabase → yaml | 先 `ontology_export` 拉回 YAML 评审，再切换 |
+| supabase → yaml | 先 `ontology_export` 拉回 YAML 基线快照，再切换 |
 
 > ⚠️ 切换前建议 `ontology_sync_check` 确认数据一致性，避免「以为在用新本体实际读旧数据」的脏状态。
 

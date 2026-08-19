@@ -1,4 +1,4 @@
-"""本体编译工具：YAML（Git 评审源）→ SQLite（发布产物）。
+"""本体编译工具：YAML（发布基线快照）→ SQLite（发布产物）。
 
 用法：
   python -m ontology_compile --yaml backend/ontology --out backend/ontology.db
