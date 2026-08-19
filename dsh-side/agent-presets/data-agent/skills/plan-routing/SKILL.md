@@ -42,6 +42,8 @@ description: 意图识别后的计划与路径选择（Plan Agent）。任何用
      → metadata_search（+ ontology_search/traverse 补充解读）
 ③ 新建/建模意图？
      → D（modeling-etl → modeling-workflow）
+     → ⚠️ 进入 D 后【第一步】必须先输出完整的需求识别清单（编号表格），
+       再一次性 ask_user_question 整体确认——不得先逐项追问
 ④ 其他操作（改 ETL/调度等）？
      → 直接调用对应 MCP，遵守工具约束与审批
 ⑤ 无法归类的复杂请求？
