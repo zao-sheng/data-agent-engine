@@ -6,6 +6,14 @@
 
 ---
 
+## 0. 建表脚本
+
+`backend/supabase/schema.sql` —— 在 Supabase SQL Editor 直接执行：
+- 6 张表（ontology_meta/objects/functions/relations/glossary/config）
+- **全部表/列/索引带 COMMENT 注释**（表 6 条 + 列 60 条 + 索引 6 条），
+  便于数据字典展示与多人协作理解
+- RLS 示例在文件末尾（默认注释，生产按需启用）
+
 ## 1. 架构定位
 
 ```
