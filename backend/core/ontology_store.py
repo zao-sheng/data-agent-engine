@@ -355,11 +355,19 @@ class SupabaseOntologyWriter:
         "ontology_tables": "table_name",
     }
 
+    # 无 revision/updated_by 列的表（纯键值表，schema 无乐观锁列）
+    NO_REVISION_TABLES = {"ontology_config", "ontology_meta"}
+
     def _upsert_row(self, table: str, row: dict, user: str = "") -> None:
-        """upsert 单行（按唯一键合并），更新 revision+updated_by+updated_at。"""
+        """upsert 单行（按唯一键合并），更新 revision+updated_by+updated_at。
+
+        纯键值表（config/meta）schema 无 revision/updated_by 列，跳过这两列，
+        避免 PostgREST 42703 undefined column。
+        """
         payload = dict(row)
-        payload["revision"] = payload.get("revision", 1) + 1
-        payload["updated_by"] = user
+        if table not in self.NO_REVISION_TABLES:
+            payload["revision"] = payload.get("revision", 1) + 1
+            payload["updated_by"] = user
         url = f"{self.url}/rest/v1/{table}?on_conflict={self.CONFLICT_KEY[table]}"
         req = urllib.request.Request(
             url, data=json.dumps([payload]).encode(), method="POST",
@@ -369,6 +377,16 @@ class SupabaseOntologyWriter:
         with urllib.request.urlopen(req, timeout=30) as resp:
             if resp.status not in (200, 201, 204):
                 raise RuntimeError(f"upsert {table} 失败: HTTP {resp.status}")
+
+    def upsert_many(self, table: str, rows: list[dict], user: str = "") -> int:
+        """批量 upsert（幂等，按唯一键合并）。行须已对齐键集（normalize_rows）。
+
+        供导入脚本（ontology_import / ontology_tables_import）复用——
+        凭证只从调用方传入，脚本不硬编码 key。返回成功写入行数。
+        """
+        for row in rows:
+            self._upsert_row(table, row, user)
+        return len(rows)
 
     def upsert_object(self, obj: dict, user: str = "") -> None:
         self._upsert_row("ontology_objects", obj, user)

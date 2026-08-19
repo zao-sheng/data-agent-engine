@@ -1,6 +1,8 @@
 # Data Agent 引擎 · 代码解读报告 v3
 
-> 基准：commit `ac83dc7`（59 个文件，24 次提交）· 评测门禁 29/29（100%，阈值 ≥90%）· 引擎单测 114 项全部通过
+> ⚠️ 本报告为阶段性代码解读快照，仓库结构/统计随迭代更新——以 README、`backend/tests/` 实际文件与测试结果为准。
+> 基准（原始）：commit `ac83dc7`（59 个文件，24 次提交）· 评测门禁 29/29（100%，阈值 ≥90%）
+> 最新：评测门禁 29/29 · 引擎单测 125 项（12 文件）· MCP 工具 17 个
 > 目的：基于**当前代码**逐层解读技术架构、各层作用、安全模型、端到端执行过程与关键技术细节，供整体核对。
 
 ---
@@ -10,13 +12,13 @@
 ```
 data-agent-engine/  (59 files, 24 commits)
 ├── backend/                        # Python 引擎（100% Python，零 JS）
-│   ├── core/        17 模块 ≈2700 行（含 intent.py 意图识别，行数见 §3 各小节标题）
-│   ├── mcp_servers/  server.py     # FastMCP，18 个工具
+│   ├── core/        18 模块（含 intent.py 意图识别，行数见 §3 各小节标题）
+│   ├── mcp_servers/  server.py     # FastMCP，17 个工具
 │   ├── ontology/     config · objects · functions · relations · glossary（5 YAML）
 │   ├── seed/         schema.sql（15 表）· seed.py（固定种子生成器）
 │   ├── builder/      build_ontology.py（表结构→本体骨架）
 │   ├── eval/         golden_dataset.jsonl（29 条：21 翻译执行 + 8 意图分类）· eval.py（门禁）
-│   └── tests/        10 个文件 114 项测试（详见 §7）
+│   └── tests/        12 个文件 125 项测试（详见 §7）
 ├── dsh-side/         setup_dsh.py · test_setup_dsh.py
 │   └── agent-presets/data-agent/   preset + persona + 8 skills
 ├── install.sh · README.md · LICENSE(MIT) · backend/.env.example
@@ -332,7 +334,7 @@ server 启动：`setup_runtime_logger` → 构建 Ontology/Validator/Translator/
 - **seed**：15 表（DWD×4/DWS×4/ADS×3/DIM×4），统一 `dt` 分区，字段跨层冗余；**DWS/ADS 由 DWD 用 SQL 聚合生成**（三层口径一致，评测可交叉验证）；固定种子 42 可复现；10% 无效单让过滤有意义；近 90 天数据。
 - **builder**：PRAGMA 读表结构 → 推断对象/映射/关系候选/粒度 → YAML 骨架（人工补 description/指标 formula/join_key 核对）；换主题时辅助生成本体。
 - **eval**：29 条金标准——21 条翻译执行（基础取数 / 多指标同域+跨域 / 指标族变体 / 行级权限 / 负例，断言：校验/表选择/可执行/行数/结果列/多表合并）+ **8 条意图分类**（expect_intent/mixed/metrics_missing，plan 层门禁）；通过率 ≥90% 门禁（当前 29/29 100%）；GitHub Actions CI（seed 重建 → eval → 引擎单测 → DSH 侧回归）。
-- **tests**：10 个文件 114 项全部通过（test_security 10 / test_dialects 5 / test_observability 6 / test_metadata 11 / test_modeling 13 / test_modeling_plan 13 / test_intent 19 / test_ontology_store 11 / test_supabase_store 7 / test_ontology_writer 11 / **test_ontology_sync 4**）。
+- **tests**：12 个文件 125 项全部通过（test_security 10 / test_dialects 5 / test_observability 6 / test_metadata 11 / test_modeling 13 / test_modeling_plan 13 / test_intent 19 / test_ontology_store 11 / test_supabase_store 12 / test_ontology_writer 13 / test_ontology_sync 4 / **test_table_metadata 8**）。
 
 ---
 
@@ -343,7 +345,7 @@ server 启动：`setup_runtime_logger` → 构建 Ontology/Validator/Translator/
 ```
 ① 用户提问 ──▶ DSH agent（数据助理预设）
 ② plan-routing：意图分类（四类）→ 路径选择（A/元数据/D/其他）
-③ path-a：oag-retrieval（Step0 term_normalize 归一 → Step1 ontology_search 定位 →
+③ oag-retrieval：Step0 term_normalize 归一 → Step1 ontology_search 定位 →
      Step2 版本/口径确认 → Step3 ontology_traverse 关系图：join_key/required_filter）
 ④ mql-authoring：生成 MQL → mql_validate 校验
 ⑤ mql_explain → 中文确认信息 + confirm_token → ask_user_question 用户确认

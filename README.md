@@ -48,10 +48,10 @@ git clone <repo> && cd data-agent-engine
 | 多表/多指标 | 事实×维度自动 JOIN（零猜测）；同域多列 + 跨域 CTE 对齐 |
 | MQL 用户确认 | confirm_token 工具层强制（防跳过确认）；query_token 防绕过翻译执行裸 SQL |
 | 元数据检索 | `metadata_search`：表（15 张样例表元数据入库）/口径/血缘/就绪；Supabase 模式查 `ontology_tables` 真源，未配置回落本地 |
-| 建模流程（路径 D） | modeling-workflow 阶段化（需求→方案→落地→测试→上线→调度→SLA/DQC）；清单确认协议（可编辑）；modeling_plan 配对 DDL+ETL（Spark SQL） |
-| 本体存储 | YAML 默认 / SQLite 产物 / Supabase 真源，换存储只动读取层（store 接口） |
+| 建模流程（路径 D） | modeling-workflow 阶段化（需求→方案→落地→测试→上线→调度→SLA/DQC）；清单确认协议（可编辑）；modeling_plan 配对 DDL+ETL（Spark SQL）；对象注册自动采集关联表元数据入 `ontology_tables` |
+| 本体存储 | YAML 默认 / SQLite 产物 / Supabase 真源，换存储只动读取层（store 接口）；凭证只从 `.env` 读取，不写死在代码/脚本 |
 | 安全与运维 | 双令牌 + 审计/运行日志（轮转）+ 启动自检 + health_check + 配置外置 `.env` |
-| 评测门禁 | Golden Dataset 回归（29 条：翻译执行 + 意图分类）+ 114 项单测，CI 自动跑 |
+| 评测门禁 | Golden Dataset 回归（29 条：翻译执行 + 意图分类）+ 125 项单测，CI 自动跑 |
 
 ## 示例提问（部署后直接问）
 
@@ -98,8 +98,8 @@ backend/
 │                  ddl_gen/etl_gen/modeling_plan/intent/ontology_store/ontology_writer/
 │                  query_token/confirm_token/audit/runtime_log/startup_check/config）
 ├── mcp_servers/   FastMCP 入口（17 个工具）
-├── supabase/      schema.sql（建表）+ rls.sql（权限）
-├── tests/         11 文件 114 项单测
+├── supabase/      schema.sql（7 张表建表）+ rls.sql（权限）
+├── tests/         12 文件 125 项单测
 └── eval/          Golden Dataset（29 条）+ 评测门禁
 dsh-side/          setup_dsh.py + 「数据助理」预设模板 + 8 个 skills
 ```

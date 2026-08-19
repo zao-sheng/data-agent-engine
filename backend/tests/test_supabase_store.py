@@ -140,6 +140,37 @@ class SupabaseWriterTest(unittest.TestCase):
         self.assertIn("on_conflict=table_name", req.full_url)
 
     @mock.patch("core.ontology_store.urllib.request.urlopen")
+    def test_upsert_config_no_revision_column(self, mock_urlopen):
+        """config 是纯键值表（无 revision/updated_by 列）→ payload 不带这两列。
+
+        回归：早前 _upsert_row 无条件写 revision/updated_by 会导致
+        PostgREST 42703 undefined column。
+        """
+        resp = mock.Mock()
+        resp.status = 201
+        mock_urlopen.return_value.__enter__.return_value = resp
+        self.w.upsert_config("time_dimension", "dt", user="alice")
+        req = mock_urlopen.call_args.args[0]
+        self.assertIn("on_conflict=key", req.full_url)
+        import json
+        payload = json.loads(req.data.decode())[0]
+        self.assertEqual(payload["key"], "time_dimension")
+        self.assertEqual(payload["value"], '"dt"')        # JSON 序列化
+        self.assertNotIn("revision", payload)             # 无该列
+        self.assertNotIn("updated_by", payload)           # 无该列
+
+    @mock.patch("core.ontology_store.urllib.request.urlopen")
+    def test_upsert_many_batch(self, mock_urlopen):
+        """upsert_many 逐行 upsert，返回行数（供导入脚本复用）。"""
+        resp = mock.Mock()
+        resp.status = 201
+        mock_urlopen.return_value.__enter__.return_value = resp
+        n = self.w.upsert_many("ontology_objects", [
+            {"name": "A"}, {"name": "B"}], user="import")
+        self.assertEqual(n, 2)
+        self.assertEqual(mock_urlopen.call_count, 2)
+
+    @mock.patch("core.ontology_store.urllib.request.urlopen")
     def test_update_object_revision_conflict(self, mock_urlopen):
         """PATCH 命中 0 行（204）→ 冲突。"""
         from urllib.error import HTTPError

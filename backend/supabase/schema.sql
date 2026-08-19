@@ -247,7 +247,7 @@ COMMENT ON INDEX idx_functions_name   IS '按指标名查指标（管理端检�
 
 -- ============================================================
 -- RLS：见独立脚本 backend/supabase/rls.sql
--- 生产启用行级安全时执行 rls.sql（6 表 anon 只读 / authenticated 可写），
+-- 生产启用行级安全时执行 rls.sql（7 表 anon 只读 / authenticated 可写），
 -- 本文件不内嵌策略，避免双份维护。
 -- ============================================================
 -- 快速参考（完整策略见 rls.sql）：
