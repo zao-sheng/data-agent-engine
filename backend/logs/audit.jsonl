@@ -1,0 +1,8 @@
+{"ts": "2026-08-19T17:30:03+0800", "tool": "semantic_translate", "action": "call", "outcome": "ok", "elapsed_ms": 0, "result": {"sql_fp": "20fa992e6c3a", "dialect": "sqlite", "fact_table": "ads_ord_gmv_1d", "tables_used": ["ads_ord_gmv_1d"]}}
+{"ts": "2026-08-19T17:30:03+0800", "tool": "execute_sql", "action": "call", "outcome": "ok", "elapsed_ms": 4, "result": {"row_count": 1, "truncated": false, "columns": ["gmv"]}}
+{"ts": "2026-08-19T17:30:03+0800", "tool": "execute_sql", "action": "call", "outcome": "error", "elapsed_ms": 0, "result": {}}
+{"ts": "2026-08-19T17:30:03+0800", "tool": "execute_sql", "action": "call", "outcome": "error", "elapsed_ms": 0, "result": {}}
+{"ts": "2026-08-19T17:30:03+0800", "tool": "execute_sql", "action": "call", "outcome": "error", "elapsed_ms": 0, "result": {}}
+{"ts": "2026-08-19T17:30:03+0800", "tool": "semantic_translate", "action": "call", "outcome": "error", "elapsed_ms": 0, "result": {}}
+{"ts": "2026-08-19T17:30:16+0800", "tool": "semantic_translate", "action": "call", "outcome": "ok", "elapsed_ms": 0, "args": {"mql": {"metrics": ["gmv"], "dimensions": [], "filters": [], "time_range": "20260705"}, "user_region_ids": [1, 2], "dialect": "sqlite"}, "result": {"sql_fp": "30b46c026ca2", "dialect": "sqlite", "fact_table": "dws_ord_pay_1d", "tables_used": ["dws_ord_pay_1d"]}}
+{"ts": "2026-08-19T17:30:16+0800", "tool": "execute_sql", "action": "call", "outcome": "ok", "elapsed_ms": 4, "args": {"sql_fp": "30b46c026ca2", "sql_len": 100, "query_token": "ea8c1349…"}, "result": {"row_count": 1, "truncated": false, "columns": ["gmv"]}}

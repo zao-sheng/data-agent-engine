@@ -6,18 +6,29 @@
   3. mql_validate        —— MQL 校验（安全边界：物理渗入检测）
   4. mql_explain         —— 把 MQL 转成人类可读的确认信息（用户在翻译执行前确认）
   5. semantic_translate  —— 确定性翻译：MQL → 可执行 SQL（含权限注入/表选择/默认 t-1）
-  6. execute_sql         —— 只读执行翻译出的 SQL，返回结果集
+                          —— 翻译成功即签发 query_token（绑定 SQL）
+  6. execute_sql         —— 只读执行翻译出的 SQL（必须携带 query_token，防绕过翻译直查）
   7. ddl_generate        —— 路径 D：从 Ontology 对象生成建表 DDL（遵守分层命名规范）
   8. scheduler_submit    —— 路径 D：提交调度任务（预留：待接入平台 mcp-scheduler）
 
-环境变量：
-  DATA_AGENT_BACKEND —— backend 目录（默认取本文件上级的上级）
-  DATA_AGENT_DB      —— SQLite 库路径（默认 backend/seed/sample.db）
+安全模型（P0）：
+  * 查询令牌：semantic_translate 签发、execute_sql 校验，SQL 与令牌强绑定，
+    任何绕过翻译引擎的裸 SQL 都会被拒绝（行级权限/表选择/required_filter
+    不再可被绕过）。
+  * 审计日志：所有工具调用落 jsonl（backend/logs/audit.jsonl，轮转清理），
+    记录调用方、动作、入参摘要、耗时与结果规模。
+
+环境变量（统一 DATA_AGENT_ 前缀，见 core/config.py）：
+  DATA_AGENT_BACKEND   —— backend 目录（默认取本文件上级的上级）
+  DATA_AGENT_DB        —— SQLite 库路径（默认 backend/seed/sample.db）
+  DATA_AGENT_LOG_DIR   —— 日志目录（默认 backend/logs）
+  DATA_AGENT_TOKEN_TTL —— 查询令牌有效期秒（默认 300）
 """
 from __future__ import annotations
 
 import os
 import sys
+import time
 import warnings
 from pathlib import Path
 
@@ -32,6 +43,9 @@ if str(BACKEND_ROOT) not in sys.path:
 from mcp.server.fastmcp import FastMCP  # noqa: E402
 
 from core import Executor, MqlValidator, Ontology, Translator  # noqa: E402
+from core.audit import audit, setup_audit_logger  # noqa: E402
+from core.config import CONFIG  # noqa: E402
+from core.query_token import QueryTokenStore  # noqa: E402
 
 BASE = Path(os.environ.get("DATA_AGENT_BACKEND", BACKEND_ROOT))
 DB = Path(os.environ.get("DATA_AGENT_DB", BASE / "seed" / "sample.db"))
@@ -41,10 +55,92 @@ _validator = MqlValidator(_onto)
 _translator = Translator(_onto)
 _executor = Executor(str(DB))
 
+# 查询令牌存储（P0-1）：翻译签发 → 执行校验
+_token_store = QueryTokenStore(ttl_seconds=CONFIG.query_token_ttl,
+                               max_tokens=CONFIG.query_token_max)
+
+# 审计日志（P0-3）：jsonl + 轮转
+setup_audit_logger(CONFIG.log_dir, max_bytes=CONFIG.audit_max_bytes,
+                   backup_count=CONFIG.audit_backup_count)
+
 mcp = FastMCP("data-agent")
 
 
+def _audit_tool(fn):
+    """工具调用审计包装：记录耗时/成败/入参摘要。
+
+    functools.wraps 保留签名（FastMCP 依赖 inspect.signature 生成 schema）。
+    审计失败不影响主流程。
+    """
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        t0 = time.time()
+        try:
+            result = fn(*args, **kwargs)
+            outcome = "ok" if not (isinstance(result, dict) and result.get("error")) else "error"
+            audit(fn.__name__, "call", outcome,
+                  elapsed_ms=int((time.time() - t0) * 1000),
+                  args=_summarize_args(kwargs or {}, fn.__name__),
+                  result=_summarize_result(result, fn.__name__))
+            return result
+        except Exception as e:  # noqa: BLE001 —— 审计后重新抛出，由 MCP 层转为错误结果
+            audit(fn.__name__, "call", "exception",
+                  elapsed_ms=int((time.time() - t0) * 1000),
+                  args=_summarize_args(kwargs or {}, fn.__name__),
+                  error=str(e)[:500])
+            raise
+    return wrapper
+
+
+def _summarize_args(kwargs: dict, tool: str) -> dict:
+    """入参摘要：大对象只保留关键字段，避免审计日志膨胀。"""
+    out: dict = {}
+    for k, v in kwargs.items():
+        if k == "mql" and isinstance(v, dict):
+            out["mql"] = {
+                "metrics": [m.get("name") if isinstance(m, dict) else m
+                            for m in (v.get("metrics") or [])],
+                "dimensions": [d.get("name") for d in v.get("dimensions", [])],
+                "filters": [f.get("field") for f in v.get("filters", [])],
+                "time_range": v.get("time_range"),
+            }
+        elif k == "sql":
+            out["sql_fp"] = QueryTokenStore.fingerprint(str(v))
+            out["sql_len"] = len(str(v))
+        elif k == "user":
+            out["user_region_ids"] = v.get("region_ids") if isinstance(v, dict) else None
+        elif k == "query_token":
+            out["query_token"] = f"{str(v)[:8]}…" if v else None
+        elif isinstance(v, (str, int, float, bool)) or v is None:
+            out[k] = v
+        else:
+            out[k] = type(v).__name__
+    return out
+
+
+def _summarize_result(result, tool: str) -> dict:
+    """结果摘要：结果集只记录规模，不记录明细数据（隐私 + 体积）。"""
+    if not isinstance(result, dict):
+        return {"type": type(result).__name__}
+    out: dict = {}
+    if "rows" in result:
+        out["row_count"] = result.get("row_count")
+        out["truncated"] = result.get("truncated")
+        out["columns"] = result.get("columns")
+    elif "sql" in result:
+        out["sql_fp"] = QueryTokenStore.fingerprint(str(result.get("sql", "")))
+        out["dialect"] = result.get("metadata", {}).get("dialect")
+        out["fact_table"] = result.get("metadata", {}).get("fact_table")
+        out["tables_used"] = result.get("metadata", {}).get("tables_used")
+    elif tool == "ontology_search":
+        out["hits"] = len(str(result).splitlines()) if isinstance(result, str) else None
+    return out
+
+
 @mcp.tool()
+@_audit_tool
 def ontology_search(query: str) -> str:
     """OAG Step1/2：按名称/别名检索业务对象、指标与属性。只返回 Ontology 中已注册的内容，不得发明。"""
     q = query.strip().lower()
@@ -63,6 +159,7 @@ def ontology_search(query: str) -> str:
 
 
 @mcp.tool()
+@_audit_tool
 def ontology_traverse(root: str, max_depth: int = 2) -> str:
     """OAG Step3：从业务对象出发沿关系图 BFS 扩展，返回 JOIN 键、必要过滤、可达对象。"""
     if root not in _onto.objects:
@@ -86,30 +183,47 @@ def ontology_traverse(root: str, max_depth: int = 2) -> str:
 
 
 @mcp.tool()
+@_audit_tool
 def mql_validate(mql: dict) -> dict:
     """MQL 校验（安全边界）：schema + 物理渗入检测。任何物理表/字段名出现在 MQL 中都会被拒绝。"""
     return _validator.validate(mql)
 
 
 @mcp.tool()
+@_audit_tool
 def semantic_translate(mql: dict, user: dict | None = None, dialect: str = "sqlite") -> dict:
     """确定性翻译引擎：MQL → 可执行 SQL。含行级权限注入（user.region_ids）、
     表选择（预聚合/明细+多表 JOIN）、required_filter、默认时间 t-1。零 LLM。
-    dialect: sqlite（默认，已实现已测试）/ doris（预留映射，仅翻译不执行，
-    返回的 metadata.dialect_verified=false，执行前需接入 _execute_remote）。"""
+    翻译成功返回 query_token（绑定 SQL），execute_sql 必须携带——禁止绕过
+    翻译引擎执行裸 SQL。
+    dialect: sqlite（默认，已实现已测试）/ doris / mysql / hive / sparksql
+    （远程方言仅翻译，需在 backend/.env 配置 DATA_AGENT_DSN_<方言> 并接入
+    _execute_remote 后执行）。"""
     result = _validator.validate(mql)
     if not result["ok"]:
         return {"error": "MQL 校验失败", "validation": result}
-    return _translator.translate(mql, user or {}, dialect=dialect)
+    tr = _translator.translate(mql, user or {}, dialect=dialect)
+    if "error" in tr:
+        return tr
+    tr["query_token"] = _token_store.issue(tr["sql"])
+    return tr
 
 
 @mcp.tool()
-def execute_sql(sql: str) -> dict:
-    """只读执行 SQL（仅 SELECT/CTE，禁写；行数上限 1000），返回结果集。"""
+@_audit_tool
+def execute_sql(sql: str, query_token: str) -> dict:
+    """只读执行 SQL（仅 SELECT/CTE，禁写；行数上限 1000），返回结果集。
+
+    必须携带 semantic_translate 返回的 query_token：令牌与 SQL 强绑定，
+    禁止绕过翻译引擎执行任意 SQL（行级权限/表选择/口径过滤由翻译环节保证）。"""
+    ok, reason = _token_store.verify(query_token, sql)
+    if not ok:
+        return {"error": reason}
     return _executor.execute(sql)
 
 
 @mcp.tool()
+@_audit_tool
 def mql_explain(mql: dict) -> dict:
     """把 MQL 转成人类可读的确认信息。用户在 semantic_translate 执行【之前】用本工具
     把即将查询的指标口径/维度/过滤/时间展示给用户确认。"""
@@ -146,6 +260,7 @@ def mql_explain(mql: dict) -> dict:
 
 
 @mcp.tool()
+@_audit_tool
 def metric_disambiguate(query: str) -> dict:
     """指标歧义识别（多口径指标族）：精确命中 → 返回 exact；
     命中指标族（如 GMV 有支付/下单/消费口径）→ 返回 family 全部变体及差异，供用户确认；
@@ -204,6 +319,7 @@ def metric_disambiguate(query: str) -> dict:
 
 
 @mcp.tool()
+@_audit_tool
 def term_normalize(text: str) -> dict:
     """业务黑话/别名归一（OAG Step 0）：把用户问题中的黑话/别名
     （如 poi/店铺→Store、goods/商品→Product）确定性地归一为 Ontology 标准术语。
@@ -213,6 +329,7 @@ def term_normalize(text: str) -> dict:
 
 
 @mcp.tool()
+@_audit_tool
 def ddl_generate(obj_name: str, layer: str, domain: str = "ord",
                  subject: str = None) -> dict:
     """路径 D（ETL）：从 Ontology 对象生成建表 DDL 草稿，严格遵守数仓分层命名规范：
@@ -246,6 +363,7 @@ def ddl_generate(obj_name: str, layer: str, domain: str = "ord",
 
 
 @mcp.tool()
+@_audit_tool
 def scheduler_submit(task_spec: dict) -> dict:
     """路径 D（ETL）：提交调度任务（**预留**）。当前未接入公司调度平台 MCP（mcp-scheduler），
     接入后在此补充核心逻辑：任务依赖、调度周期（cron）、告警通道、幂等键。"""
