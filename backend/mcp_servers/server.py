@@ -46,6 +46,8 @@ from core import Executor, MqlValidator, Ontology, Translator  # noqa: E402
 from core.audit import audit, setup_audit_logger  # noqa: E402
 from core.config import CONFIG  # noqa: E402
 from core.confirm_token import ConfirmTokenStore  # noqa: E402
+from core.ddl_gen import generate_ddl  # noqa: E402
+from core.etl_gen import generate_etl  # noqa: E402
 from core.query_token import QueryTokenStore  # noqa: E402
 from core.runtime_log import log_error, log_info, log_warn, setup_runtime_logger  # noqa: E402
 from core.startup_check import run_startup_checks, startup_status  # noqa: E402
@@ -363,34 +365,25 @@ def term_normalize(text: str) -> dict:
 @_audit_tool
 def ddl_generate(obj_name: str, layer: str, domain: str = "ord",
                  subject: str = None) -> dict:
-    """路径 D（ETL）：从 Ontology 对象生成建表 DDL 草稿，严格遵守数仓分层命名规范：
-    表名 = {layer}_{domain}_{subject}_{粒度后缀}（后缀：明细 _di、日汇总 _1d、月汇总 _1m）。
+    """路径 D（ETL）：从 Ontology 对象生成建表 DDL 草稿（Spark SQL，Hive 风格）。
+    严格遵守数仓分层命名规范：表名 = {layer}_{domain}_{subject}_{粒度后缀}
+    （后缀：明细 _di、日汇总 _1d、月汇总 _1m）；事实表统一 dt 分区。
     口径/类型以 Ontology 为准，生成后需人工 Review + 走审批。"""
-    o = _onto.get_object(obj_name)
-    if not o:
-        return {"error": f"对象 {obj_name} 不存在"}
-    subject = subject or obj_name.lower()
-    suffix = {"DWD": "_di", "DWS": "_1d", "ADS": "_1d", "DIM": ""}.get(layer.upper(), "_di")
-    table = f"{layer.lower()}_{domain}_{subject}{suffix}"
-    type_map = {"string": "VARCHAR(255)", "decimal": "DECIMAL(18,2)", "date": "DATE",
-                "int": "BIGINT", "bigint": "BIGINT", "integer": "BIGINT"}
-    cols = []
-    for p in o.get("properties", []):
-        cols.append(f"  {p['name']} {type_map.get(p.get('type'), 'STRING')} "
-                    f"COMMENT '{p.get('description', p['name'])}'")
-    for c in o.get("required_filters", []):
-        field = c.split(" ")[0]
-        if field not in {p["name"] for p in o.get("properties", [])}:
-            cols.append(f"  {field} BIGINT COMMENT '必要过滤标志 {c}'")
-    # 非 DIM 层统一加分区 dt + 主键
-    if layer.upper() != "DIM":
-        cols.append(f"  {_onto.partition_col} VARCHAR(8) NOT NULL COMMENT '分区 {_onto.partition_col}(yyyyMMdd)'")
-    ddl = (f"-- Doris 风格 DDL（目标引擎 Doris；其他引擎需在方言适配层转换）\n"
-           f"CREATE TABLE IF NOT EXISTS {table} (\n" + ",\n".join(cols) +
-           "\n) COMMENT '" + o.get("description", "") + "'\n" +
-           f"PARTITION BY RANGE({_onto.partition_col})();\n")
-    return {"table": table, "layer": layer.upper(), "domain": domain,
-            "subject": subject, "ddl": ddl, "review_required": True}
+    return generate_ddl(_onto, obj_name, layer, domain=domain, subject=subject)
+
+
+@mcp.tool()
+@_audit_tool
+def etl_generate(obj_name: str, layer: str, domain: str = "ord",
+                 subject: str = None,
+                 metrics: list[str] = None,
+                 dimensions: list[str] = None) -> dict:
+    """路径 D（ETL）：从 Ontology 生成 Spark SQL ETL 管道草稿
+    （INSERT OVERWRITE 聚合，源=DWD 明细 → 目标=汇总/应用表）。
+    指标公式/required_filter/维度映射以 Ontology 为准，跨域指标自动 CTE 合并
+    （与翻译引擎多指标策略一致）。生成后需人工 Review + 走审批。"""
+    return generate_etl(_onto, obj_name, layer, domain=domain, subject=subject,
+                        metrics=metrics, dimensions=dimensions)
 
 
 @mcp.tool()

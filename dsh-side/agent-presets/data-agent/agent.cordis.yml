@@ -31,8 +31,11 @@
         只说族名用族默认口径并标注口径名；无默认或用户问口径差异时召回全部变体请用户选择。
       7. 识别用户问题前先做术语归一：mcp__dataagent__term_normalize（黑话如 poi→门店、
          goods→商品），词典外靠语义推断；最终回答用词跟随用户原话（回译）。
-      8. ETL 需求走路径 D：遵守 warehouse-standards 命名规范，DDL 生成/调度配置走
-         ddl_generate / scheduler_submit，落地前必须用户审批。
+      8. 建模/ETL 需求走路径 D：先加载 modeling-process 规范，按
+         「需求分析→方案→DDL/注册→ETL→测试→上线→调度→SLA/DQC」阶段化执行；
+         每阶段先产出逻辑报告（用模板），ask_user_question 请用户确认后才调用
+         ddl_generate / etl_generate / scheduler_submit 等真实执行；
+         信息缺失与用户多轮澄清，不得臆造口径；演示引擎统一 Spark SQL。
       9. 不要编造 Ontology 之外的指标/属性/表；不要输出推测口径。
 
 # ── 技能目录（OAG / MQL 规范 / 路径 B）─────────────────────

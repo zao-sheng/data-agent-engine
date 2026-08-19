@@ -28,3 +28,24 @@
 {"ts": "2026-08-19T17:38:23+0800", "tool": "mql_explain", "action": "call", "outcome": "ok", "elapsed_ms": 0, "result": {}}
 {"ts": "2026-08-19T17:38:23+0800", "tool": "semantic_translate", "action": "call", "outcome": "ok", "elapsed_ms": 0, "args": {"mql": {"metrics": ["gmv"], "dimensions": [], "filters": [], "time_range": {"start": "20260701", "end": "20260707"}}, "confirm_token": "589de90aaee9ff559efe59654d08fbca"}, "result": {"sql_fp": "20fa992e6c3a", "dialect": "sqlite", "fact_table": "ads_ord_gmv_1d", "tables_used": ["ads_ord_gmv_1d"]}}
 {"ts": "2026-08-19T17:38:23+0800", "tool": "execute_sql", "action": "call", "outcome": "ok", "elapsed_ms": 0, "args": {"sql_fp": "20fa992e6c3a", "sql_len": 98, "query_token": "6460a5c3…"}, "result": {"row_count": 1, "truncated": false, "columns": ["gmv"]}}
+{"ts": "2026-08-19T17:55:08+0800", "tool": "term_normalize", "action": "call", "outcome": "ok", "elapsed_ms": 0, "args": {"text": "查询近7天退款订单量"}, "result": {}}
+{"ts": "2026-08-19T17:55:08+0800", "tool": "ontology_search", "action": "call", "outcome": "ok", "elapsed_ms": 0, "args": {"query": "退款"}, "result": {"type": "str"}}
+{"ts": "2026-08-19T17:55:08+0800", "tool": "ontology_search", "action": "call", "outcome": "ok", "elapsed_ms": 0, "args": {"query": "退款订单量"}, "result": {"type": "str"}}
+{"ts": "2026-08-19T17:55:12+0800", "tool": "ontology_search", "action": "call", "outcome": "ok", "elapsed_ms": 0, "args": {"query": "refund_count"}, "result": {"type": "str"}}
+{"ts": "2026-08-19T17:55:12+0800", "tool": "ontology_search", "action": "call", "outcome": "ok", "elapsed_ms": 0, "args": {"query": "退单"}, "result": {"type": "str"}}
+{"ts": "2026-08-19T17:55:12+0800", "tool": "ontology_search", "action": "call", "outcome": "ok", "elapsed_ms": 0, "args": {"query": "order_count"}, "result": {"type": "str"}}
+{"ts": "2026-08-19T17:55:12+0800", "tool": "ontology_traverse", "action": "call", "outcome": "ok", "elapsed_ms": 0, "args": {"root": "Refund", "max_depth": 2}, "result": {"type": "str"}}
+{"ts": "2026-08-19T17:55:18+0800", "tool": "ontology_search", "action": "call", "outcome": "ok", "elapsed_ms": 0, "args": {"query": "退款订单"}, "result": {"type": "str"}}
+{"ts": "2026-08-19T17:55:18+0800", "tool": "ontology_search", "action": "call", "outcome": "ok", "elapsed_ms": 0, "args": {"query": "refund_order"}, "result": {"type": "str"}}
+{"ts": "2026-08-19T17:56:07+0800", "tool": "ontology_search", "action": "call", "outcome": "ok", "elapsed_ms": 0, "args": {"query": "Payment"}, "result": {"type": "str"}}
+{"ts": "2026-08-19T17:56:16+0800", "tool": "ontology_traverse", "action": "call", "outcome": "ok", "elapsed_ms": 0, "args": {"root": "Payment", "max_depth": 2}, "result": {"type": "str"}}
+{"ts": "2026-08-19T17:56:16+0800", "tool": "ontology_search", "action": "call", "outcome": "ok", "elapsed_ms": 0, "args": {"query": "退款汇总"}, "result": {"type": "str"}}
+{"ts": "2026-08-19T17:56:57+0800", "tool": "ddl_generate", "action": "call", "outcome": "ok", "elapsed_ms": 0, "args": {"obj_name": "Refund", "layer": "dws", "domain": "ord", "subject": "refund"}, "result": {}}
+{"ts": "2026-08-19T18:00:59+0800", "tool": "scheduler_submit", "action": "call", "outcome": "error", "elapsed_ms": 0, "args": {"task_spec": "dict"}, "result": {}}
+{"ts": "2026-08-19T18:02:58+0800", "tool": "health_check", "action": "call", "outcome": "ok", "elapsed_ms": 1, "result": {}}
+{"ts": "2026-08-19T18:25:43+0800", "tool": "ddl_generate", "action": "call", "outcome": "ok", "elapsed_ms": 0, "args": {"subject": "pay"}, "result": {}}
+{"ts": "2026-08-19T18:25:43+0800", "tool": "ddl_generate", "action": "call", "outcome": "ok", "elapsed_ms": 0, "result": {}}
+{"ts": "2026-08-19T18:25:47+0800", "tool": "etl_generate", "action": "call", "outcome": "ok", "elapsed_ms": 0, "args": {"subject": "gmv", "metrics": "list"}, "result": {}}
+{"ts": "2026-08-19T18:25:47+0800", "tool": "etl_generate", "action": "call", "outcome": "ok", "elapsed_ms": 0, "args": {"subject": "pay", "metrics": "list", "dimensions": "list"}, "result": {}}
+{"ts": "2026-08-19T18:27:57+0800", "tool": "ddl_generate", "action": "call", "outcome": "ok", "elapsed_ms": 0, "args": {"obj_name": "Payment", "layer": "ADS", "domain": "ord", "subject": "gmv"}, "result": {}}
+{"ts": "2026-08-19T18:27:58+0800", "tool": "etl_generate", "action": "call", "outcome": "ok", "elapsed_ms": 1, "args": {"obj_name": "Payment", "layer": "ADS", "domain": "ord", "subject": "gmv", "metrics": "list", "dimensions": null}, "result": {}}

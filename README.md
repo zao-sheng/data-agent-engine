@@ -106,14 +106,15 @@ git clone <repo> && cd data-agent-engine
 | 配置外置 | 全部运行时配置走 `backend/.env`（`DATA_AGENT_*` 前缀，见 `.env.example`）：介质/方言/远程连接串/令牌 TTL/日志轮转参数 |
 | 检索索引 | `ontology_search` 走加载期构建的倒排索引（名称/别名/展示名），O(1) 精确命中 + 前缀兜底，替代全量线性扫描 |
 | 默认 t-1 | 未识别时间参数 → 默认查昨天，回答标注 |
-| ETL（路径 D） | `ddl_generate` 已实现（遵守命名规范）；调度 `scheduler_submit` 预留待接平台 MCP |
+| ETL（路径 D） | `ddl_generate` / `etl_generate` 已实现（Spark SQL，Hive 风格）；调度 `scheduler_submit` 预留待接平台 MCP |
+| 建模流程 | 路径 D 按 modeling-process 规范阶段化执行（需求分析→方案→DDL/注册→ETL→测试→上线→调度→SLA/DQC），每阶段先产出逻辑报告（需求识别表/方案书模板）→ 用户确认 → 才真实执行；缺失信息多轮澄清不臆造 |
 | 查询令牌 | `semantic_translate` 签发 query_token（绑定 SQL、短 TTL），`execute_sql` 必须携带校验——禁止绕过翻译引擎执行裸 SQL（行级权限/表选择/口径过滤不可被绕过） |
 | 审计日志 | 所有 MCP 工具调用落 `backend/logs/audit.jsonl`（调用方/动作/入参摘要/耗时/结果规模），轮转清理不无限增长 |
 | 运行日志 | `backend/logs/runtime.jsonl` 记录启动自检/连接/异常等运行态，jsonl + 轮转；启动自检（ontology/介质/日志目录）fail-fast，`health_check` 工具返回引擎状态 |
 | 安全边界 | MQL 物理渗入检测（精确物理名集合）；只读执行器（禁写、行数上限）；查询令牌强制翻译→执行绑定 |
 | 主题可替换 | 引擎零主题耦合：时间维度名/分区列名由 `ontology/config.yaml` 配置 |
 | 评测门禁 | Golden Dataset 回归，通过率 ≥ 90% 才放行（CI 已配置） |
-| 方言状态 | SQLite 已实现已测试（样例库）；**Doris/MySQL/Hive/SparkSQL 为远程方言**（翻译已映射，`dialect_verified` 由快照测试覆盖，执行需在 `backend/.env` 配 `DATA_AGENT_DSN_*` 接入驱动） |
+| 方言状态 | 查询执行：SQLite 已实现已测试（样例库）；MySQL/Doris/Hive/SparkSQL 为远程方言（翻译已映射，`dialect_verified` 由快照测试覆盖，执行需在 `backend/.env` 配 `DATA_AGENT_DSN_*` 接入驱动）。**DDL/ETL 演示统一 Spark SQL（Hive 风格）** |
 
 ## 架构
 
@@ -121,11 +122,12 @@ git clone <repo> && cd data-agent-engine
 DSH 侧（配置，零代码）                Python 侧（引擎）
 ┌──────────────────────────┐   MCP    ┌──────────────────────────────┐
 │ 数据助理 preset           │ ──────▶ │ mcp_servers/server.py        │
-│  persona + 8 个 skills    │  stdio   │  ├ ontology_search/traverse  │
+│  persona + 9 个 skills    │  stdio   │  ├ ontology_search/traverse  │
 │  dsh-mcp-client           │          │  ├ mql_validate/explain     │
 └──────────────────────────┘          │  ├ semantic_translate（翻译） │
                                       │  ├ execute_sql（只读执行）    │
-                                      │  └ ddl_generate / scheduler  │
+                                      │  ├ ddl_generate / etl_generate（Spark SQL）
+                                       │  └ scheduler_submit（预留）  │
                                       └──────────────────────────────┘
 ```
 
@@ -134,10 +136,13 @@ backend/
 ├── seed/          样例数据生成器（schema.sql + seed.py，固定种子）
 ├── builder/       本体半自动构建器（表结构 → Ontology YAML 骨架）
 ├── ontology/      Ontology（objects/functions/relations/glossary/config；order 为示例主题）
-├── core/          确定性引擎（loader / validator / translator / executor）
-├── mcp_servers/   FastMCP 入口（8 个工具）
+├── core/          确定性引擎（loader / validator / translator / executor /
+│                  ddl_gen / etl_gen / query_token / confirm_token / audit /
+│                  runtime_log / startup_check / config）
+├── mcp_servers/   FastMCP 入口（12 个工具）
+├── tests/         引擎单元测试（P0 安全 / P1 方言 / P2 可观测 / P4 工程化 / 路径 D）
 └── eval/          Golden Dataset + 评测门禁
-dsh-side/          setup_dsh.py + 「数据助理」预设模板 + 8 个 skills
+dsh-side/          setup_dsh.py + 「数据助理」预设模板 + 9 个 skills
 ```
 
 ## 二次开发
