@@ -48,6 +48,7 @@ from core.config import CONFIG  # noqa: E402
 from core.confirm_token import ConfirmTokenStore  # noqa: E402
 from core.ddl_gen import generate_ddl  # noqa: E402
 from core.etl_gen import generate_etl  # noqa: E402
+from core.metadata import MetadataService  # noqa: E402
 from core.query_token import QueryTokenStore  # noqa: E402
 from core.runtime_log import log_error, log_info, log_warn, setup_runtime_logger  # noqa: E402
 from core.startup_check import run_startup_checks, startup_status  # noqa: E402
@@ -64,6 +65,7 @@ _onto = Ontology(BASE / "ontology")
 _validator = MqlValidator(_onto)
 _translator = Translator(_onto)
 _executor = Executor(str(DB))
+_metadata = MetadataService(_onto, db_path=str(DB))
 
 # 启动自检（P2）：fail-fast，启动即暴露配置/介质问题
 _STARTUP_CHECKS = run_startup_checks(_onto, _executor)
@@ -359,6 +361,16 @@ def term_normalize(text: str) -> dict:
     返回 {normalized_text, mappings:[{raw, canonical, type}]}；回答时应按 mappings 回译用户用词。"""
     norm, mappings = _onto.normalize_terms(text)
     return {"normalized_text": norm, "mappings": mappings, "original": text}
+
+
+@mcp.tool()
+@_audit_tool
+def metadata_search(query: str) -> dict:
+    """元数据检索（元数据咨询意图）：查表/指标维度/口径/加工逻辑(血缘)/就绪时间。
+    返回结构化结果：tables(表信息) / metrics(指标口径) / lineage(加工逻辑) /
+    readiness(就绪时间)。当前基于 Ontology 与样例库实现；接入真实元数据
+    平台后由接口替换，返回结构不变。"""
+    return _metadata.search(query)
 
 
 @mcp.tool()

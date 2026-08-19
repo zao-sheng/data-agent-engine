@@ -5,6 +5,16 @@ description: 路径 A——已注册指标的取数查询。OAG 理解 → MQL �
 
 # 路径 A：指标取数（理解与执行分离）
 
+## 前置检查：指标/维度是否齐全（plan-routing 已判定，进入前复核）
+1. 用 `mcp__dataagent__metadata_search`（或 `ontology_search`）确认用户要的
+   **每个指标、每个维度**都已注册。
+2. **全部齐全** → 继续下方流程。
+3. **有缺失** → 明确告知用户：未找到「指标 X / 维度 Y」的注册信息 →
+   `ask_user_question` 询问是否新建：
+   - 是 → **改走路径 D**（load `modeling-etl` skill，走建模全流程）；
+   - 否 → 结束，不查询不编造；
+   - **严禁**用近似指标/字段替代查询，严禁自我发挥。
+
 ## 流程（顺序执行，不可跳步）
 1. **OAG 五步**：load `oag-retrieval` skill 完成实体识别 → 定位 → 关系扩展 → 组装。
 2. **生成 MQL**：按 `mql-authoring` skill 生成 → `mcp__dataagent__mql_validate` 校验通过。
@@ -28,3 +38,4 @@ description: 路径 A——已注册指标的取数查询。OAG 理解 → MQL �
 - `semantic_translate` 缺 confirm_token 或 MQL 变更后会失败——必须重新 `mql_explain`。
 - 翻译引擎输出的 SQL 直接执行，不要改写、不要拼接。
 - 回答中标注 `metric_version`、数据水印（时间范围 + 是否默认 t-1）。
+- 缺指标/维度只允许「告知缺失 + 询问是否新建」，禁止近似替代。
