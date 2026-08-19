@@ -43,14 +43,37 @@ _LINEAGE: dict[str, dict] = {
 
 
 class MetadataService:
-    def __init__(self, onto: Ontology, db_path: str | Path | None = None):
+    """元数据检索：表/指标/血缘/就绪。
+
+    数据源优先级：
+      1. ontology_tables（Supabase 真源，多人维护的表元数据）——tables_store 配置时查这里
+      2. 本地回落：Ontology（source_tables）+ 内置血缘逻辑（未配置 Supabase 或表不存在时）
+    """
+
+    def __init__(self, onto: Ontology, db_path: str | Path | None = None,
+                 tables_store: Any = None):
         self.onto = onto
         self.db_path = Path(db_path) if db_path else None
+        self.tables_store = tables_store  # 查 ontology_tables 的 client（可选）
 
     # ── 表检索 ──────────────────────────────────────────────
+    def _table_from_store(self, table: str) -> dict | None:
+        """从 ontology_tables 查单表（Supabase 真源）。未配置/表不存在返回 None。"""
+        if self.tables_store is None:
+            return None
+        try:
+            return self.tables_store.table_info(table)
+        except Exception:  # noqa: BLE001 —— 库不可用回落后端
+            return None
+
     def table_info(self, table: str) -> dict | None:
-        """按物理表名查表信息（层/字段/粒度/预聚合/来源对象）。"""
+        """按物理表名查表信息。优先 ontology_tables，回落 Ontology。"""
         table = table.lower()
+        # ① 库优先（多人维护的表元数据）
+        from_store = self._table_from_store(table)
+        if from_store is not None:
+            return from_store
+        # ② 回落 Ontology（本地推导）
         for obj_name, o in self.onto.objects.items():
             for t in o.get("source_tables", []):
                 if t["table"] == table:
@@ -126,8 +149,16 @@ class MetadataService:
 
     # ── 血缘 / 加工逻辑 ──────────────────────────────────────
     def lineage(self, table: str) -> dict | None:
-        """查表的加工逻辑（血缘）：来源表 + 加工说明；样例库内置，真实场景接元数据平台。"""
+        """查表的加工逻辑（血缘）：来源表 + 加工说明。
+
+        优先 ontology_tables（Supabase 真源），回落本地内置血缘。
+        """
         table = table.lower()
+        from_store = self._table_from_store(table)
+        if from_store and from_store.get("lineage", {}).get("source"):
+            lin = from_store["lineage"]
+            return {"table": table, "source": lin.get("source", ""),
+                    "logic": lin.get("logic", "")}
         if table in _LINEAGE:
             return {"table": table, **_LINEAGE[table]}
         # DWD 明细无上游加工（贴源），返回空
@@ -140,7 +171,12 @@ class MetadataService:
 
     # ── 就绪时间 ─────────────────────────────────────────────
     def readiness(self, table: str) -> dict:
-        """表就绪时间（样例库约定 t-1；真实场景由元数据接口返回）。"""
+        """表就绪时间：优先 ontology_tables（真源维护），回落本地约定 t-1。"""
+        table = table.lower()
+        from_store = self._table_from_store(table)
+        if from_store and from_store.get("readiness"):
+            return {"table": table, "ready_partition": from_store["readiness"],
+                    "note": "来自 ontology_tables（Supabase 真源维护）"}
         return {"table": table, "ready_partition": "t-1（昨日）",
                  "note": "样例库由 seed.py 生成，分区就绪约定为 T+1；真实接入后由元数据平台提供"}
 

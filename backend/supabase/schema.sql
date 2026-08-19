@@ -173,7 +173,52 @@ COMMENT ON COLUMN ontology_glossary.updated_at IS '最后更新时间';
 COMMENT ON COLUMN ontology_glossary.updated_by IS '最后更新人标识';
 
 -- ════════════════════════════════════════════════════════════
--- 表 6：ontology_config —— 全局配置（对应 config.yaml）
+-- 表 6：ontology_tables —— 数仓表元数据（供 metadata_search 检索）
+-- 作用：每张数仓表的完整元数据（层/字段/血缘/就绪/粒度），
+--      由采集器从 schema + 血缘逻辑提取入库；metadata_search 优先查这里
+-- ════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS ontology_tables (
+  id             BIGSERIAL PRIMARY KEY,
+  table_name     TEXT NOT NULL UNIQUE,      -- dwd_ord_pay_di / dim_store / ...
+  layer          TEXT NOT NULL DEFAULT '',  -- DWD / DWS / ADS / DIM
+  domain         TEXT NOT NULL DEFAULT 'ord',
+  subject        TEXT NOT NULL DEFAULT '',
+  description    TEXT NOT NULL DEFAULT '',  -- 表业务说明
+  granularity    TEXT NOT NULL DEFAULT '',  -- 粒度（明细_原子 / 日 / 月 / 维度）
+  partition_col  TEXT NOT NULL DEFAULT '',  -- 分区列（事实表=dt，DIM=空）
+  owner_object   TEXT,                      -- 归属 Ontology 对象名（如有）
+  fields         JSONB NOT NULL DEFAULT '[]',  -- [{name,type,description,is_pk,is_partition}]
+  lineage        JSONB NOT NULL DEFAULT '{}',  -- {source: 上游表, logic: 加工逻辑}
+  readiness      TEXT NOT NULL DEFAULT '',  -- 就绪时间（如 T+1）
+  row_estimate   BIGINT,                    -- 行数估算（可选）
+  revision       BIGINT NOT NULL DEFAULT 1,
+  is_deleted     BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by     TEXT
+);
+COMMENT ON TABLE ontology_tables IS '数仓表元数据：每张表的层/字段/血缘/就绪/粒度，metadata_search 的数据源';
+COMMENT ON COLUMN ontology_tables.id IS '自增主键';
+COMMENT ON COLUMN ontology_tables.table_name IS '物理表名（dwd_ord_pay_di / dim_store / ...）';
+COMMENT ON COLUMN ontology_tables.layer IS '数仓分层：DWD（明细）/ DWS（汇总）/ ADS（应用）/ DIM（维度）';
+COMMENT ON COLUMN ontology_tables.domain IS '主题域（ord/usr/prd/...）';
+COMMENT ON COLUMN ontology_tables.subject IS '主题（pay/order/gmv/...）';
+COMMENT ON COLUMN ontology_tables.description IS '表业务说明';
+COMMENT ON COLUMN ontology_tables.granularity IS '粒度：明细_原子 / 日 / 月 / 维度';
+COMMENT ON COLUMN ontology_tables.partition_col IS '分区列（事实表=dt，DIM 为空）';
+COMMENT ON COLUMN ontology_tables.owner_object IS '归属 Ontology 业务对象名（如有）';
+COMMENT ON COLUMN ontology_tables.fields IS '字段数组（JSONB）：[{name,type,description,is_pk,is_partition}]';
+COMMENT ON COLUMN ontology_tables.lineage IS '血缘（JSONB）：{source: 上游表, logic: 加工逻辑}';
+COMMENT ON COLUMN ontology_tables.readiness IS '就绪时间（如 T+1）';
+COMMENT ON COLUMN ontology_tables.row_estimate IS '行数估算（可选）';
+COMMENT ON COLUMN ontology_tables.revision IS '乐观锁版本号';
+COMMENT ON COLUMN ontology_tables.is_deleted IS '软删除标记';
+COMMENT ON COLUMN ontology_tables.created_at IS '创建时间';
+COMMENT ON COLUMN ontology_tables.updated_at IS '最后更新时间';
+COMMENT ON COLUMN ontology_tables.updated_by IS '最后更新人标识';
+
+-- ════════════════════════════════════════════════════════════
+-- 表 7：ontology_config —— 全局配置（对应 config.yaml）
 -- 作用：主题无关配置（时间维度名/分区列名），引擎零主题耦合的关键
 -- ════════════════════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS ontology_config (

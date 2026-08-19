@@ -18,6 +18,7 @@ ALTER TABLE ontology_functions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ontology_relations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ontology_glossary  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ontology_config    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ontology_tables    ENABLE ROW LEVEL SECURITY;
 
 -- ── 2. 只读策略（anon / 未登录均可读）──────────────────────
 CREATE POLICY "read_all" ON ontology_meta      FOR SELECT USING (true);
@@ -26,6 +27,7 @@ CREATE POLICY "read_all" ON ontology_functions FOR SELECT USING (true);
 CREATE POLICY "read_all" ON ontology_relations FOR SELECT USING (true);
 CREATE POLICY "read_all" ON ontology_glossary  FOR SELECT USING (true);
 CREATE POLICY "read_all" ON ontology_config    FOR SELECT USING (true);
+CREATE POLICY "read_all" ON ontology_tables    FOR SELECT USING (true);
 
 -- ── 3. 写入策略（authenticated 登录用户可写）────────────────
 CREATE POLICY "write_auth" ON ontology_meta
@@ -49,6 +51,10 @@ CREATE POLICY "write_auth" ON ontology_glossary
   WITH CHECK (auth.role() = 'authenticated');
 
 CREATE POLICY "write_auth" ON ontology_config
+  FOR ALL USING (auth.role() = 'authenticated')
+  WITH CHECK (auth.role() = 'authenticated');
+
+CREATE POLICY "write_auth" ON ontology_tables
   FOR ALL USING (auth.role() = 'authenticated')
   WITH CHECK (auth.role() = 'authenticated');
 

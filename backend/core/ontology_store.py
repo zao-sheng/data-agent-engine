@@ -360,6 +360,53 @@ class SupabaseOntologyWriter:
         return r.status_code == 200 and bool(r.json())
 
 
+class TableMetadataStore:
+    """从 Supabase ontology_tables 查表元数据（metadata_search 的库数据源）。
+
+    返回结构与 MetadataService.table_info 兼容（供上层直接消费）：
+      {table, layer, layer_cn, description, granularity, partition_col,
+       owner_object, fields[], lineage{source,logic}, readiness, row_estimate}
+    """
+
+    def __init__(self, url: str, key: str, schema: str = "public"):
+        self.url = url.rstrip("/")
+        self.key = key
+        self.schema = schema
+
+    def _select_one(self, table_name: str) -> dict | None:
+        try:
+            r = _supabase_client().get(
+                f"{self.url}/rest/v1/ontology_tables",
+                params={"select": "*", "table_name": f"eq.{table_name}",
+                        "is_deleted": "eq.false"},
+                headers={"apikey": self.key, "Authorization": f"Bearer {self.key}",
+                         "Accept-Profile": self.schema})
+            r.raise_for_status()
+            rows = r.json()
+        except Exception:  # noqa: BLE001 —— 库不可用/表不存在时回落本地
+            return None
+        return rows[0] if rows else None
+
+    def table_info(self, table: str) -> dict | None:
+        row = self._select_one(table.lower())
+        if row is None:
+            return None
+        return {
+            "table": row.get("table_name", table),
+            "layer": row.get("layer", ""),
+            "layer_cn": {"DWD": "明细层", "DWS": "汇总层", "ADS": "应用层",
+                         "DIM": "维度层"}.get(row.get("layer", ""), row.get("layer", "")),
+            "description": row.get("description", ""),
+            "granularity": row.get("granularity", ""),
+            "partition_col": row.get("partition_col", ""),
+            "owner_object": row.get("owner_object"),
+            "fields": row.get("fields", []),
+            "lineage": row.get("lineage", {}),
+            "readiness": row.get("readiness", ""),
+            "row_estimate": row.get("row_estimate"),
+        }
+
+
 # ── 工厂 ─────────────────────────────────────────────────────
 def create_store(kind: str, base: Path | str | None = None,
                  db: Path | str | None = None,

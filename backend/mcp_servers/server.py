@@ -51,7 +51,7 @@ from core.etl_gen import generate_etl  # noqa: E402
 from core.intent import classify_intent  # noqa: E402
 from core.metadata import MetadataService  # noqa: E402
 from core.modeling_plan import generate_modeling_plan  # noqa: E402
-from core.ontology_store import create_store  # noqa: E402
+from core.ontology_store import TableMetadataStore, create_store  # noqa: E402
 from core.ontology_writer import create_writer, writer_supports  # noqa: E402
 from core.query_token import QueryTokenStore  # noqa: E402
 from core.runtime_log import log_error, log_info, log_warn, setup_runtime_logger  # noqa: E402
@@ -76,7 +76,13 @@ _onto = Ontology(store=create_store(CONFIG.ontology_store,
 _validator = MqlValidator(_onto)
 _translator = Translator(_onto)
 _executor = Executor(str(DB))
-_metadata = MetadataService(_onto, db_path=str(DB))
+# 元数据检索：Supabase 模式配 ontology_tables 查库（多人维护表元数据），
+# yaml/sqlite 模式 tables_store=None 回落本地（Ontology + 内置血缘）
+_tables_store = (TableMetadataStore(CONFIG.supabase_url, CONFIG.supabase_key,
+                                    schema=CONFIG.supabase_schema)
+                 if CONFIG.ontology_store == "supabase" and CONFIG.supabase_url
+                 else None)
+_metadata = MetadataService(_onto, db_path=str(DB), tables_store=_tables_store)
 
 # 本体写入器（多人编辑闭环）：按 store 类型分发（yaml 文件 / supabase 表）
 _writer = create_writer(CONFIG.ontology_store,
@@ -92,7 +98,7 @@ def _reload_ontology() -> dict:
     重建 Ontology（从 store 重读）并刷新依赖它的 validator/translator/metadata。
     工具函数访问模块级 _onto，reload 后新值自动生效；_executor 不依赖本体，无需重建。
     """
-    global _onto, _validator, _translator, _metadata
+    global _onto, _validator, _translator, _metadata, _tables_store
     store = create_store(CONFIG.ontology_store,
                          base=CONFIG.ontology_dir,
                          db=CONFIG.ontology_db,
@@ -102,7 +108,11 @@ def _reload_ontology() -> dict:
     _onto = Ontology(store=store)
     _validator = MqlValidator(_onto)
     _translator = Translator(_onto)
-    _metadata = MetadataService(_onto, db_path=str(DB))
+    _tables_store = (TableMetadataStore(CONFIG.supabase_url, CONFIG.supabase_key,
+                                        schema=CONFIG.supabase_schema)
+                     if CONFIG.ontology_store == "supabase" and CONFIG.supabase_url
+                     else None)
+    _metadata = MetadataService(_onto, db_path=str(DB), tables_store=_tables_store)
     return {
         "ok": True,
         "store": CONFIG.ontology_store,

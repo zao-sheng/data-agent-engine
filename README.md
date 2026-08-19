@@ -47,7 +47,7 @@ git clone <repo> && cd data-agent-engine
 | 指标族/黑话 | GMV 多口径三级识别（标注口径名）；poi→门店 等黑话归一（回答回译） |
 | 多表/多指标 | 事实×维度自动 JOIN（零猜测）；同域多列 + 跨域 CTE 对齐 |
 | MQL 用户确认 | confirm_token 工具层强制（防跳过确认）；query_token 防绕过翻译执行裸 SQL |
-| 元数据检索 | `metadata_search`：表/口径/血缘/就绪时间（可替换真实元数据接口） |
+| 元数据检索 | `metadata_search`：表（15 张样例表元数据入库）/口径/血缘/就绪；Supabase 模式查 `ontology_tables` 真源，未配置回落本地 |
 | 建模流程（路径 D） | modeling-workflow 阶段化（需求→方案→落地→测试→上线→调度→SLA/DQC）；清单确认协议（可编辑）；modeling_plan 配对 DDL+ETL（Spark SQL） |
 | 本体存储 | YAML 默认 / SQLite 产物 / Supabase 真源，换存储只动读取层（store 接口） |
 | 安全与运维 | 双令牌 + 审计/运行日志（轮转）+ 启动自检 + health_check + 配置外置 `.env` |
