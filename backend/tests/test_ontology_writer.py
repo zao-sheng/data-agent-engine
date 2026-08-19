@@ -69,10 +69,11 @@ class WriterFactoryTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             create_writer("supabase")
 
-    def test_sqlite_rejected(self):
-        with self.assertRaises(ValueError) as ctx:
-            create_writer("sqlite", base="/tmp")
-        self.assertIn("只读", str(ctx.exception))
+    def test_sqlite_returns_readonly(self):
+        """sqlite 不再抛异常（server 能启动），返回只读占位。"""
+        from core.ontology_writer import ReadOnlyWriter
+        w = create_writer("sqlite", base="/tmp")
+        self.assertIsInstance(w, ReadOnlyWriter)
 
     def test_unsupported(self):
         with self.assertRaises(ValueError):
@@ -97,3 +98,21 @@ class SupabaseWriterChannelTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReadOnlyWriterTest(unittest.TestCase):
+    """sqlite 模式：只读占位，写操作报错，server 能启动。"""
+
+    def test_sqlite_writer_is_readonly(self):
+        from core.ontology_writer import create_writer, ReadOnlyWriter
+        w = create_writer("sqlite")
+        self.assertIsInstance(w, ReadOnlyWriter)
+        with self.assertRaises(ValueError) as ctx:
+            w.upsert_object({"name": "X"})
+        self.assertIn("只读", str(ctx.exception))
+
+    def test_writer_supports_false_for_sqlite(self):
+        from core.ontology_writer import writer_supports
+        self.assertFalse(writer_supports("sqlite"))
+        self.assertTrue(writer_supports("yaml"))
+        self.assertTrue(writer_supports("supabase"))

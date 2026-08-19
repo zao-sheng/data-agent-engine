@@ -85,6 +85,33 @@ def create_writer(kind: str, base: Path | str | None = None,
                   schema: str = "public") -> Any:
     """按 store 类型创建写入器。sqlite 不支持写入（只读产物）。"""
     kind = (kind or "yaml").lower()
+class ReadOnlyWriter:
+    """只读存储的写入占位（sqlite 编译产物）：所有写操作明确报错。
+
+    用途：server 启动时统一 create_writer，sqlite 模式不抛异常（引擎能起），
+    但任何 ontology_register 写入会得到清晰错误提示。
+    """
+
+    def __init__(self, kind: str = "sqlite"):
+        self.kind = kind
+
+    def _deny(self, *_a, **_k):
+        raise ValueError(
+            f"{self.kind} 是只读编译产物，不支持直接写入："
+            "请写 backend/ontology/*.yaml 后重新 ontology_compile")
+
+    upsert_object = _deny
+    upsert_function = _deny
+    upsert_relation = _deny
+    upsert_glossary = _deny
+    upsert_config = _deny
+
+
+def create_writer(kind: str, base: Path | str | None = None,
+                  url: str | None = None, key: str | None = None,
+                  schema: str = "public") -> Any:
+    """按 store 类型创建写入器。sqlite 只读（返回占位，写操作报错）。"""
+    kind = (kind or "yaml").lower()
     if kind == "yaml":
         if base is None:
             raise ValueError("yaml writer 需要 base（ontology 目录）")
@@ -94,7 +121,7 @@ def create_writer(kind: str, base: Path | str | None = None,
             raise ValueError("supabase writer 需要 url 与 key（DATA_AGENT_SUPABASE_URL/KEY）")
         return SupabaseOntologyWriter(url, key, schema)
     if kind == "sqlite":
-        raise ValueError("sqlite 是只读编译产物，不支持直接写入：请写 YAML 后重新 ontology_compile")
+        return ReadOnlyWriter("sqlite")
     raise ValueError(f"不支持的 ontology writer: {kind}（支持 yaml / supabase）")
 
 
