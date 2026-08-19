@@ -1,8 +1,10 @@
 """评测门禁：Golden Dataset 回归。
 
-对每条金标准用例：MQL 校验 → 翻译 → 执行，断言：
-  * 应拒绝的用例必须被校验器拒绝
-  * 其余用例：翻译成功、SQL 可执行、事实表 == 预期表、结果行数 > 0
+对每条金标准用例：
+  * 意图分类用例（expect_intent）：断言确定性意图识别结果（plan 层门禁）
+  * MQL 用例：校验 → 翻译 → 执行，断言：
+    - 应拒绝的用例必须被校验器拒绝
+    - 其余用例：翻译成功、SQL 可执行、事实表 == 预期表、结果行数 > 0
 通过率 ≥ 90% 才返回 0（CI 门禁），否则返回 1。
 
 用法：python -m eval.eval [--threshold 0.9]
@@ -17,6 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core import Executor, MqlValidator, Ontology, Translator  # noqa: E402
+from core.intent import classify_intent  # noqa: E402
 
 BASE = Path(__file__).resolve().parent.parent
 
@@ -37,6 +40,28 @@ def main() -> int:
     passed, failed = 0, []
 
     for i, case in enumerate(cases, 1):
+        # 意图分类用例（plan 层门禁）：断言确定性意图识别结果
+        if case.get("expect_intent"):
+            try:
+                r = classify_intent(onto, case["question"])
+                if r["intent"] != case["expect_intent"]:
+                    raise AssertionError(
+                        f"意图识别错误: 期望 {case['expect_intent']}，实际 {r['intent']}"
+                        f"（evidence={r['evidence'][:4]}）")
+                if case.get("expect_mixed") and case["expect_mixed"] not in \
+                        [m["intent"] for m in r.get("mixed", [])]:
+                    raise AssertionError(
+                        f"混合意图缺失: 期望含 {case['expect_mixed']}，实际 {r.get('mixed')}")
+                if case.get("expect_metrics_missing") is not None and \
+                        r["metrics_missing"] != case["expect_metrics_missing"]:
+                    raise AssertionError(
+                        f"metrics_missing 不符: 期望 {case['expect_metrics_missing']}，"
+                        f"实际 {r['metrics_missing']}")
+                passed += 1
+            except AssertionError as e:
+                failed.append((i, case["question"], str(e)))
+            continue
+
         mql = dict(case["mql"])
         user = mql.pop("_user", None)
         try:

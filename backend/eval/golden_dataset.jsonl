@@ -19,3 +19,11 @@
 {"question": "下单用户数按区域（COUNT DISTINCT user_id）", "mql": {"metrics": [{"name": "order_user_cnt"}], "dimensions": [{"name": "region_name"}], "time_range": {"start": "-30d", "end": "today"}}, "expect_table": "dwd_ord_order_di", "expect_rows_gt": 0}
 {"question": "指标族变体：最近 7 天下单 GMV（order_gmv，走 dws 预聚合）", "mql": {"metrics": [{"name": "order_gmv"}], "time_range": {"start": "-7d", "end": "today"}}, "expect_table": "dws_ord_order_1d", "expect_rows_gt": 0}
 {"question": "指标族变体：消费 GMV 按门店类型（consume_gmv）", "mql": {"metrics": [{"name": "consume_gmv"}], "dimensions": [{"name": "store_type"}], "time_range": {"start": "-30d", "end": "today"}}, "expect_table": "dwd_ord_consume_di", "expect_rows_gt": 0}
+{"question": "GMV 怎么算的", "expect_intent": "metadata"}
+{"question": "昨天的 GMV 是多少", "expect_intent": "query"}
+{"question": "帮我建一个用户复购率表", "expect_intent": "modeling"}
+{"question": "把 gmv 的 ETL 调度改到早上 8 点", "expect_intent": "operation"}
+{"question": "ads_ord_gmv_1d 这张表是怎么来的", "expect_intent": "metadata"}
+{"question": "GMV 怎么算的？顺便拉一下最近 30 天", "expect_intent": "metadata", "expect_mixed": "query"}
+{"question": "你好", "expect_intent": "unclear"}
+{"question": "最近 30 天卖得怎么样", "expect_intent": "query", "expect_metrics_missing": true}

@@ -48,6 +48,7 @@ from core.config import CONFIG  # noqa: E402
 from core.confirm_token import ConfirmTokenStore  # noqa: E402
 from core.ddl_gen import generate_ddl  # noqa: E402
 from core.etl_gen import generate_etl  # noqa: E402
+from core.intent import classify_intent  # noqa: E402
 from core.metadata import MetadataService  # noqa: E402
 from core.modeling_plan import generate_modeling_plan  # noqa: E402
 from core.query_token import QueryTokenStore  # noqa: E402
@@ -362,6 +363,24 @@ def term_normalize(text: str) -> dict:
     返回 {normalized_text, mappings:[{raw, canonical, type}]}；回答时应按 mappings 回译用户用词。"""
     norm, mappings = _onto.normalize_terms(text)
     return {"normalized_text": norm, "mappings": mappings, "original": text}
+
+
+@mcp.tool()
+@_audit_tool
+def intent_classify(text: str) -> dict:
+    """意图识别（plan-routing Step1 的确定性预分类）：四类意图
+    query(取数) / metadata(元数据咨询) / modeling(新建建模) / operation(其他操作) / unclear(低置信)。
+
+    返回结构化证据：{intent, confidence(high/medium/low), path(A/metadata/D/direct/clarify),
+    normalized_text, metric_hits, object_hits, evidence[], mixed[],
+    metrics_missing(取数但指标未命中), note}。
+
+    用法（LLM 侧）：
+      * 证据充分（high/medium）→ 采信 intent 与 path；
+      * mixed 非空 → 先执行主 intent，末尾询问另一诉求是否一并处理；
+      * intent=unclear 或证据冲突 → 向用户澄清，禁止猜路径；
+      * query 且 metrics_missing=true → 告知缺失 + 询问是否新建（走 D），禁止近似替代。"""
+    return classify_intent(_onto, text)
 
 
 @mcp.tool()
