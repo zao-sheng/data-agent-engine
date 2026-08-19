@@ -1,4 +1,7 @@
-"""Ontology 加载器：读 YAML，构建对象/函数/关系/属性归属索引。
+"""Ontology：从原始本体数据构建索引（对象/函数/关系/属性归属/黑话/搜索）。
+
+数据源由 OntologyStore 提供（YAML 默认 / SQLite 编译缓存 / Supabase 预留），
+本类只负责「原始数据 → 索引」，与存储解耦（见 core/ontology_store.py）。
 
 翻译引擎（JOIN 链）与 MQL 校验器（属性存在性）都以这里的索引为准。
 """
@@ -6,26 +9,37 @@ from __future__ import annotations
 
 from collections import deque
 from pathlib import Path
+from typing import Any
 
-import yaml
+from .ontology_store import OntologyData, OntologyStore, YamlOntologyStore
 
 
 class Ontology:
-    def __init__(self, base: Path | str):
-        base = Path(base)
+    def __init__(self, base: Path | str | None = None,
+                 store: OntologyStore | None = None):
+        """构造：base（YAML 目录，兼容旧调用）或 store（自定义存储）。
+
+        二选一：给 base 用 YamlOntologyStore；给 store 用自定义实现（sqlite/supabase）。
+        """
+        if store is None:
+            if base is None:
+                raise ValueError("Ontology 需要 base 或 store 参数")
+            store = YamlOntologyStore(base)
+        data = store.load()
+        self._build(data)
+
+    def _build(self, data: OntologyData) -> None:
+        """从原始本体数据构建全部索引。"""
+        raw_objects = data.objects
+        raw_functions = data.functions
+        self.relations: list[dict] = data.relations
+        cfg = data.config
+
         self.objects: dict[str, dict] = {}
         self.functions: dict[str, dict] = {}
-        self.relations: list[dict] = []
         self.property_owner: dict[str, str] = {}   # 业务属性 → 归属对象
         self.edges: dict[str, list[tuple[str, str]]] = {}  # source → [(target, join_key)]
 
-        raw_objects = yaml.safe_load((base / "objects.yaml").read_text())["objects"]
-        raw_functions = yaml.safe_load((base / "functions.yaml").read_text())["functions"]
-        self.relations = yaml.safe_load((base / "relations.yaml").read_text())["relations"]
-
-        # 全局配置（主题无关）：时间维度属性名 + 物理分区列名
-        cfg_path = base / "config.yaml"
-        cfg = yaml.safe_load(cfg_path.read_text()) if cfg_path.exists() else {}
         self.time_dim: str = cfg.get("time_dimension", "order_date")
         self.partition_col: str = cfg.get("partition_column", "dt")
 
@@ -49,10 +63,8 @@ class Ontology:
                     entry["default"] = f["name"]
 
         # 业务黑话倒排索引：黑话(小写) -> {canonical, type, display}
-        # 只收录「真黑话/别名」（≠ 标准名自身）；归一目标 = 展示名（对象用中文 display_name）。
         self.term_index: dict[str, dict] = {}
-        gloss = yaml.safe_load((base / "glossary.yaml").read_text()).get("glossary", []) \
-            if (base / "glossary.yaml").exists() else []
+        gloss = data.glossary
 
         def display_of(canonical: str, t: str) -> str:
             if t == "object":
@@ -76,7 +88,6 @@ class Ontology:
                     add_term(a, p["name"], "property")
 
         # 物理名集合（物理表名 + 物理列名），供 MQL 物理渗入检测用。
-        # 排除与业务指标名/属性名同名的条目（如 order_user_cnt 既是指标名也是物理列名）。
         self.physical_names: set[str] = set()
         for o in raw_objects:
             for t in o.get("source_tables", []):
@@ -86,9 +97,7 @@ class Ontology:
         business_names = set(self.functions) | set(self.property_owner)
         self.physical_names -= business_names
 
-        # 维度对象 → SQL 别名（主题无关，动态生成）：
-        # 仅 DIM 层对象参与 JOIN，才需要别名；事实表固定 'F'；
-        # 别名 = 首字母大写，避开 'F'，冲突时追加序号（确定性强）。
+        # 维度对象 → SQL 别名（主题无关，动态生成）
         self.dim_aliases: dict[str, str] = {}
         counters: dict[str, int] = {}
         for o in raw_objects:
@@ -102,9 +111,7 @@ class Ontology:
             counters[base] = c
             self.dim_aliases[name] = base if c == 1 else f"{base}{c}"
 
-        # 搜索倒排索引（P4-15）：key=归一化 token（名称/别名/展示名小写），
-        # value=命中描述行。ontology_search 用它 O(1) 检索，避免全量线性扫描。
-        # 索引在加载时构建一次（Ontology 不可变），搜索时不再遍历 objects。
+        # 搜索倒排索引：key=归一化 token，value=命中描述行
         self.search_index: dict[str, list[str]] = {}
         for o in raw_objects:
             name = o["name"]

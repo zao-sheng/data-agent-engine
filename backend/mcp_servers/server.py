@@ -51,6 +51,7 @@ from core.etl_gen import generate_etl  # noqa: E402
 from core.intent import classify_intent  # noqa: E402
 from core.metadata import MetadataService  # noqa: E402
 from core.modeling_plan import generate_modeling_plan  # noqa: E402
+from core.ontology_store import create_store  # noqa: E402
 from core.query_token import QueryTokenStore  # noqa: E402
 from core.runtime_log import log_error, log_info, log_warn, setup_runtime_logger  # noqa: E402
 from core.startup_check import run_startup_checks, startup_status  # noqa: E402
@@ -63,7 +64,10 @@ setup_runtime_logger(CONFIG.log_dir, level=CONFIG.log_level,
                      max_bytes=CONFIG.audit_max_bytes,
                      backup_count=CONFIG.audit_backup_count)
 
-_onto = Ontology(BASE / "ontology")
+# 本体存储（1A/1B）：默认 YAML（Git 评审源）；opt-in SQLite 编译产物（DATA_AGENT_ONTOLOGY_STORE=sqlite）
+_onto = Ontology(store=create_store(CONFIG.ontology_store,
+                                    base=CONFIG.ontology_dir,
+                                    db=CONFIG.ontology_db))
 _validator = MqlValidator(_onto)
 _translator = Translator(_onto)
 _executor = Executor(str(DB))

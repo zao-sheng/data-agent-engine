@@ -33,8 +33,12 @@ class Config:
     """集中读取配置。属性即配置项，新增配置在此声明并给默认值。"""
 
     def __init__(self) -> None:
+        # 本体存储（1A/1B）：yaml（默认，Git 评审源）/ sqlite（编译产物缓存）
         self.ontology_dir: str = os.environ.get(
             "DATA_AGENT_ONTOLOGY", str(BACKEND_ROOT / "ontology"))
+        self.ontology_store: str = os.environ.get("DATA_AGENT_ONTOLOGY_STORE", "yaml").lower()
+        self.ontology_db: str = os.environ.get(
+            "DATA_AGENT_ONTOLOGY_DB", str(BACKEND_ROOT / "ontology.db"))
         self.db: str = os.environ.get(
             "DATA_AGENT_DB", str(BACKEND_ROOT / "seed" / "sample.db"))
         self.log_dir: Path = Path(os.environ.get(
