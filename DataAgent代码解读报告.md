@@ -10,17 +10,17 @@
 ```
 data-agent-engine/  (59 files, 24 commits)
 ├── backend/                        # Python 引擎（100% Python，零 JS）
-│   ├── core/        14 模块 ≈2000 行（行数见 §3 表头）
+│   ├── core/        14 模块 ≈2000 行（行数见 §3 各小节标题）
 │   ├── mcp_servers/  server.py     # FastMCP，14 个工具
 │   ├── ontology/     config · objects · functions · relations · glossary（5 YAML）
 │   ├── seed/         schema.sql（15 表）· seed.py（固定种子生成器）
 │   ├── builder/      build_ontology.py（表结构→本体骨架）
 │   ├── eval/         golden_dataset.jsonl（21 条）· eval.py（门禁）
-│   └── tests/        6 个文件 58 项测试
+│   └── tests/        6 个文件 58 项测试（详见 §7）
 ├── dsh-side/         setup_dsh.py · test_setup_dsh.py
 │   └── agent-presets/data-agent/   preset + persona + 8 skills
-├── install.sh · README.md · LICENSE(MIT) · .gitignore · backend/.env.example
-└── .github/workflows/eval.yml      # CI 评测门禁 + 单测 + DSH 侧回归
+├── install.sh · README.md · LICENSE(MIT) · backend/.env.example
+└── .github/workflows/eval.yml      # CI：评测门禁 + 单测 + DSH 侧回归
 ```
 
 ---
@@ -30,29 +30,26 @@ data-agent-engine/  (59 files, 24 commits)
 ### 1.1 三层架构
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│ 智能层（LLM 只做理解）—— DSH 侧                                  │
-│   persona（9 条硬性规则）                                        │
-│   8 个 skills：plan-routing / oag-retrieval / mql-authoring /    │
-│                query-metric / explore-fallback / modeling-etl /  │
-│                modeling-workflow / warehouse-standards           │
-└───────────────┬─────────────────────────────────────────────────┘
-                │ MCP（stdio，dsh-mcp-client）
-┌───────────────▼─────────────────────────────────────────────────┐
-│ 确定性层（零 LLM）—— Python 引擎（14 模块 ≈2000 行，详见 §3）     │
-│   mcp_servers/server.py（14 个工具，含审计包装/双令牌/启动自检）    │
-│   core/ontology_loader(索引/关系图) · mql_validator(校验+渗入检测) │
-│   core/translator(MQL→SQL/5 方言) · executor(只读执行/远程驱动)    │
-│   core/query_token+confirm_token(双令牌) · metadata(元数据检索)    │
-│   core/ddl_gen+etl_gen+modeling_plan(路径 D/Spark SQL)           │
-│   core/audit+runtime_log+startup_check+config(可观测/配置)        │
-└───────────────┬─────────────────────────────────────────────────┘
-                │ 读取
-┌───────────────▼─────────────────────────────────────────────────┐
-│ 知识层（数据）—— backend/ontology/（order 为示例主题，可替换）      │
-│   config.yaml（时间维度名/分区列名）· objects · functions ·        │
-│   relations（JOIN 键唯一来源）· glossary（黑话词典）              │
-└─────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│ 智能层（LLM 只做理解）—— DSH 侧：persona（9 条硬性规则）          │
+│   8 skills：plan-routing · oag-retrieval · mql-authoring ·     │
+│   query-metric · explore-fallback · modeling-etl ·             │
+│   modeling-workflow · warehouse-standards                      │
+└──────────────┬────────────────────────────────────────────────┘
+               │ MCP（stdio，dsh-mcp-client）
+┌──────────────▼────────────────────────────────────────────────┐
+│ 确定性层（零 LLM）—— Python 引擎（14 模块 ≈2000 行，详见 §3）    │
+│   server.py（14 工具·审计包装·双令牌·启动自检）                   │
+│   ontology_loader · mql_validator · translator(5 方言) ·       │
+│   executor · metadata · ddl/etl/modeling_plan · token ×2 ·     │
+│   audit · runtime_log · startup_check · config                 │
+└──────────────┬────────────────────────────────────────────────┘
+               │ 读取
+┌──────────────▼────────────────────────────────────────────────┐
+│ 知识层（数据）—— backend/ontology/（order 为示例主题，可替换）    │
+│   config · objects · functions · relations（JOIN 键唯一来源）·  │
+│   glossary（黑话词典）                                          │
+└────────────────────────────────────────────────────────────────┘
 ```
 
 ### 1.2 分层职责
@@ -69,18 +66,14 @@ data-agent-engine/  (59 files, 24 commits)
 2. **Ontology 单事实源**：OAG（检索）、校验器（合法性）、翻译引擎（映射/JOIN）、确认环节（口径展示）、元数据检索五者读同一份 YAML，杜绝口径漂移。
 3. **主题无关**：时间维度名/分区列名（config.yaml）、SQL 别名（动态生成）、物理名集合（从 Ontology 收集）全部数据驱动——order 只是示例。
 4. **工具即接口**：引擎的一切能力通过 MCP 工具暴露，DSH 侧不 import Python 代码，耦合面 = 工具 schema。
-5. **安全边界在工具层**：物理渗入检测、只读执行、权限注入、**双令牌（confirm_token/query_token）**、审计日志都在确定性层强制，不依赖提示词。
-6. **配置外置**：所有配置项统一 `DATA_AGENT_` 前缀（`backend/.env`，见 .env.example），与 DSH/宿主环境隔离。
+5. **安全边界在工具层**：物理渗入检测、只读执行、权限注入、**双令牌（confirm_token/query_token）**、审计日志都在确定性层强制，不依赖提示词；**配置外置**：全部 `DATA_AGENT_` 前缀（`backend/.env`，见 .env.example），换主题/换环境零代码。
 
 ---
 
 ## 2. 知识层：Ontology 详解（5 份 YAML）
 
 ### 2.1 `config.yaml` —— 主题无关配置
-```yaml
-time_dimension: order_date   # 时间维度【业务属性名】（MQL 的 dimensions 用它）
-partition_column: dt         # 物理分区列名（'YYYYMMDD'）
-```
+`time_dimension: order_date`（时间维度【业务属性名】，MQL 的 dimensions 用它）+ `partition_column: dt`（物理分区列名 'YYYYMMDD'）。
 被 loader 读取为 `onto.time_dim` / `onto.partition_col`，translator / validator / ddl_gen / etl_gen 全部引用这两个字段——**换主题只改这里**。
 
 ### 2.2 `objects.yaml` —— 业务对象 + 物理映射
@@ -90,8 +83,7 @@ partition_column: dt         # 物理分区列名（'YYYYMMDD'）
 
 | 字段 | 语义 | 例子 |
 |------|------|------|
-| `layer` | 分层（ODS/DWD/DWS/ADS/DIM） | DWD |
-| `authority` | 权威等级（gold>silver） | gold |
+| `layer` / `authority` | 分层（ODS/DWD/DWS/ADS/DIM）/ 权威等级（gold>silver） | DWD / gold |
 | `joinable` | 能否 JOIN 维度表扩展维度（仅明细表 true） | dwd_ord_pay_di: true |
 | `perm_column` | 行级权限列（无则权限过滤时被排除） | region_id |
 | `granularities` | 支持聚合到的粒度 | [day,week,month,quarter,year] |
@@ -110,15 +102,13 @@ partition_column: dt         # 物理分区列名（'YYYYMMDD'）
 | avg_order_amount | — | SUM(pay_amount)/COUNT(DISTINCT order_id) | Payment |
 | pay_count / order_count / order_user_cnt / refund_amount / consume_amount | — | … | … |
 
-每个指标还有 `required_filters`、`do_not`（防幻觉反面说明）、`version`（口径版本）、`supported_dimensions/granularities`。
+每个指标还有 `required_filters`、`do_not`（防幻觉反面说明）、`version`（口径版本）、`supported_dimensions/granularities`——口径全部以 Ontology 为准，翻译/确认/ETL 均引用同一份。
 
 ### 2.4 `relations.yaml` —— 关系图（JOIN 键唯一来源）
-15 条边：事实对象→维度对象（join_key）+ 维度间（Store→Region）。
-**翻译引擎的 JOIN 键 100% 来自这里，永不猜测**——幻觉防控的核心。同一对象对可有多条边（Payment→Product / Refund→Payment）。
+15 条边：事实对象→维度对象（join_key）+ 维度间（Store→Region）；同一对象对可有多条边（Payment→Product / Refund→Payment）。**翻译引擎的 JOIN 键 100% 来自这里，永不猜测**——幻觉防控的核心。
 
 ### 2.5 `glossary.yaml` —— 业务黑话词典
-23 条：poi/店铺/店面→Store、goods/商品→Product、成交额/销售额→gmv、实付金额→pay_amount 等。
-`canonical` 必须指向已注册对象/指标/属性；由 loader 合并对象/属性的 `aliases` 构建倒排索引；**只收录「真黑话」（标准名自身不替换）**。
+23 条：poi/店铺/店面→Store、goods/商品→Product、成交额/销售额→gmv、实付金额→pay_amount 等。`canonical` 必须指向已注册对象/指标/属性；loader 合并对象/属性 `aliases` 构建倒排索引；**只收录「真黑话」（标准名自身不替换）**。
 
 ### 2.6 各层对 Ontology 的消费方式
 
@@ -127,9 +117,7 @@ partition_column: dt         # 物理分区列名（'YYYYMMDD'）
 | OAG（ontology_search/traverse） | 实体定位（倒排索引）、关系扩展 |
 | mql_validator | 指标/属性存在性、物理名集合 |
 | translator | field_mapping、pre_aggregated、relations（JOIN）、时间配置 |
-| mql_explain | 指标公式/版本/口径名、属性含义 |
-| metric_disambiguate | 指标族变体与默认 |
-| term_normalize | 黑话归一 |
+| mql_explain / metric_disambiguate / term_normalize | 指标公式/版本/口径名/属性含义；指标族变体与默认；黑话归一 |
 | metadata（metadata_search） | 表/口径/血缘/就绪时间 |
 | ddl_gen / etl_gen / modeling_plan | 对象属性→DDL、指标公式→ETL、变更清单→配对方案 |
 
@@ -139,7 +127,7 @@ partition_column: dt         # 物理分区列名（'YYYYMMDD'）
 
 ### 3.1 `ontology_loader.py`（234 行）—— 索引工厂
 
-**构建 8 类索引**（`__init__`）：
+**构建 9 类索引**（`__init__`）：
 
 | 索引 | 类型 | 用途 |
 |------|------|------|
@@ -147,27 +135,21 @@ partition_column: dt         # 物理分区列名（'YYYYMMDD'）
 | `property_owner` | 属性→对象 | 维度/过滤合法性 + JOIN 目标判定 |
 | `edges` | 关系邻接表 | BFS 关系图遍历 |
 | `families` | 族→{variants, default} | 指标族识别 |
-| `term_index` | 黑话→{canonical, display, type} | 术语归一（只收真黑话，标准名不替换） |
-| `physical_names` | 物理表名+列名集合 | 物理渗入检测（减业务名避免误伤） |
-| `dim_aliases` | 维度对象→SQL 别名 | 多表 JOIN（动态生成，仅 DIM 层，避开 F，冲突加序号） |
-| `search_index` | 归一化 token→命中行 | ontology_search 倒排检索（O(1)，精确+前缀兜底） |
+| `term_index` / `physical_names` | 黑话→{canonical,display,type} / 物理表名+列名集合 | 术语归一（只收真黑话）/ 物理渗入检测（减业务名避免误伤） |
+| `dim_aliases` / `search_index` | 维度对象→SQL 别名 / 归一化 token→命中行 | 多表 JOIN（动态生成，仅 DIM 层，避开 F，冲突加序号）/ ontology_search 倒排检索（O(1)，精确+前缀兜底） |
 
 **核心方法**：
-- `join_path(start, target)`：BFS 最短路径，返回 `[(hop_src, hop_dst, join_key)]`——JOIN 链构建依据（如 Payment→Store→Region 两跳）。
-- `resolve_version(obj)`：**版本三级规则**——单版本直取 / `default_version` / 返回 None（调用方必须反问，绝不静默选最新）。
-- `normalize_terms(text)`：**最长匹配**黑话归一，返回 `(normalized_text, mappings)`，归一目标为展示名（对象用中文 display_name）；`search(query)`：倒排索引检索（精确 token 命中 + 前缀兜底，去重排序）。
+- `join_path`：BFS 最短路径 → `[(hop_src, hop_dst, join_key)]`——JOIN 链构建依据（如 Payment→Store→Region 两跳）。
+- `resolve_version`：**版本三级规则**——单版本直取 / `default_version` / None（调用方必须反问，绝不静默选最新）。
+- `normalize_terms`：**最长匹配**黑话归一 → `(normalized_text, mappings)`，目标=展示名；`search`：倒排索引（精确 token + 前缀兜底，去重排序）。
 
 ### 3.2 `mql_validator.py`（85 行）—— 校验 = 安全边界
 
 6 项校验（按优先级）：
 1. **物理渗入检测**：物理表名（`dwd_/dws_/...` 前缀正则，兜底强信号）+ 物理列名（`physical_names` 精确 `\b` 匹配）→ 拒绝。精确集合解决了「后缀正则误伤 `order_user_cnt` 指标名」的问题。
 2. 指标存在性（must be registered，未注册给候选清单）。
-3. 维度合法性（时间维度验粒度枚举 day/week/month/quarter/year；其余必须是注册属性）。
-4. 过滤合法性（field/operator 枚举/value 必填）。
-5. 时间完整性（有时间维度缺 time_range → warning，引擎按 t-1 兜底）。
-6. 排序/限量合法性。
-
-返回结构化 `{ok, errors, warnings}`，由 agent 决定自动修正或反问——不直接抛给用户。
+3. 维度合法性（时间维度验粒度枚举 day/week/month/quarter/year；其余必须是注册属性）；过滤合法性（field/operator 枚举/value 必填）。
+4. 时间完整性（有时间维度缺 time_range → warning，引擎按 t-1 兜底）；排序/限量合法性。
 
 ### 3.3 `translator.py`（512 行）—— 翻译引擎（核心）
 
@@ -177,11 +159,8 @@ translate()            入口：捕获 TranslateError/KeyError → {"error"}
 ├── _metric_items()    兼容 v1.0 metric / v1.1 metrics 列表
 ├── _translate()       按 owner 分组 → 单表 or 多表；组装 metadata（含 dialect/dialect_verified）
 │   ├── _single_table_sql()  同 owner：_select_table_multi（⭐表选择/分桶评分）
-│   │   ├── _metric_selects()  预聚合列 or 公式编译
-│   │   ├── _dim_expr()        维度列 → 表.列（时间维度→粒度表达式）
-│   │   ├── _map_required()/_filter_sql()  required_filter/过滤 → F.列
-│   │   ├── _permission_clause()  权限注入
-│   │   └── _time_sql()          时间范围 → dt 分区条件（五方言表达式）
+│   │   ├── _metric_selects()/_dim_expr()  预聚合列或公式编译 / 维度列→粒度表达式
+│   │   └── _map_required()/_filter_sql()/_permission_clause()/_time_sql()  required_filter/过滤/权限/dt 分区
 │   └── _multi_table_sql() 跨 owner：CTE + FULL OUTER JOIN / CROSS JOIN
 ├── _build_joins()      JOIN 链（relations BFS）
 ├── _compile_formula()  公式白名单编译
@@ -192,39 +171,35 @@ translate()            入口：捕获 TranslateError/KeyError → {"error"}
 
 ### 3.4 `executor.py`（180 行）—— 只读执行
 
-- 双重拦截：`FORBIDDEN` 正则（insert/update/delete/drop/alter/create/attach/detach/pragma/vacuum/reindex）+ SQLite `mode=ro` URI 只读打开。
-- `iso_week` 方言函数注册（翻译引擎 week 粒度表达式依赖——SQLite 无法解析 `YYYYMMDD` 紧凑格式）。
-- 行数上限 1000，`fetchmany(MAX_ROWS+1)` 判断截断。
+- 双重拦截：`FORBIDDEN` 正则（insert/update/delete/drop/alter/create/attach/detach/pragma/vacuum/reindex）+ SQLite `mode=ro` URI 只读打开；行数上限 1000（`fetchmany(MAX_ROWS+1)` 判截断）；注册 `iso_week` 方言函数（SQLite 无法解析 `YYYYMMDD` 紧凑格式，week 粒度表达式依赖它）。
 - **方言与介质解耦**：`dialect=="sqlite"` → SQLite；非 sqlite + `.db` 介质 → 明确报错（介质不匹配）；否则 `_execute_remote`——mysql/doris 走 pymysql（Doris 兼容 MySQL 协议）、hive/sparksql 走 pyhive（Thrift），DSN 来自 `DATA_AGENT_DSN_<方言>`；缺 DSN / 缺驱动 / 不支持的 scheme 均给出可操作的错误提示。
 
 ### 3.5 `config.py`（74 行）+ `startup_check.py`（101 行）—— 配置外置 + 启动自检
 
-- **config**：集中读取配置，优先级「进程环境变量 > backend/.env > 默认值」，全部 `DATA_AGENT_` 前缀：`DATA_AGENT_DB / ONTOLOGY / LOG_DIR / LOG_LEVEL / DIALECT / TOKEN_TTL / TOKEN_MAX / CONFIRM_TOKEN_TTL / CONFIRM_TOKEN_MAX / AUDIT_MAX_BYTES / AUDIT_BACKUPS / REMOTE_TIMEOUT / DSN_<方言>`。
-- **startup_check**：server 启动即校验——Ontology 可解析（对象/指标非空）、数据介质可达（sqlite 只读打开 / 远程 DSN 已配置）、日志目录可写；返回结构化 CheckResult，必需项失败即 fail-fast 暴露配置问题（而非首次取数才炸）；`startup_status` 供 health_check 输出状态快照。
+- **config**：集中读取配置，优先级「进程环境变量 > backend/.env > 默认值」，全部 `DATA_AGENT_` 前缀（`DB / ONTOLOGY / LOG_DIR / LOG_LEVEL / DIALECT / TOKEN_TTL / TOKEN_MAX / CONFIRM_TOKEN_* / AUDIT_* / REMOTE_TIMEOUT / DSN_<方言>`）。
+- **startup_check**：server 启动即校验——Ontology 可解析（对象/指标非空）、数据介质可达（sqlite 只读打开 / 远程 DSN 已配置）、日志目录可写；返回结构化 CheckResult，必需项失败即 fail-fast 暴露配置问题；`startup_status` 供 health_check 输出状态快照。
 
 ### 3.6 `metadata.py`（173 行）—— 元数据检索
 
 覆盖元数据咨询四类诉求（表 / 指标口径 / 血缘 / 就绪时间）：
 - `table_info`：物理表 → 层/中文层名/归属对象/粒度/joinable/authority/perm_column/字段（含物理列与描述）/预聚合指标；`find_tables` / `find_metrics`：关键字模糊检索。
 - `lineage`：汇总/应用表 → 来源 DWD 明细 + 加工说明（样例库内置 `_LINEAGE` 推导；DWD 明细返回「无聚合加工」）；`readiness`：表就绪时间（样例库约定 t-1 / T+1）。
-- `search`：统一入口，返回 `{tables, metrics, lineage, readiness, note}`，无命中给候选清单。
-- **可替换**：当前基于 Ontology + 样例库 schema 推导；接入真实元数据平台后替换 `MetadataService.search` 的数据源即可，对外返回结构不变。
+- `search`：统一入口，返回 `{tables, metrics, lineage, readiness, note}`，无命中给候选清单；**可替换**——接入真实元数据平台后替换 `MetadataService.search` 数据源即可，返回结构不变。
 
 ### 3.7 `ddl_gen.py`（83 行）+ `etl_gen.py`（137 行）+ `modeling_plan.py`（139 行）—— 路径 D 生成器
 
 - **ddl_gen**：从 Ontology 对象生成 **Spark SQL DDL 草稿（Hive 风格）**——类型映射（STRING/DECIMAL(18,2)/DATE/INT/BIGINT）；事实表统一 `PARTITIONED BY (dt STRING)`（分区列不进普通列）；维表无分区；列级/表级 COMMENT 保留口径。命名规范 `{layer}_{domain}_{subject}_{后缀}`（明细 `_di` / 日汇总 `_1d` / 月汇总 `_1m` / 维表无后缀）。
-- **etl_gen**：生成 **Spark SQL INSERT OVERWRITE 聚合脚本**——源=目标对象同 owner 的 DWD 明细（聚合语义要求源为明细）；指标公式复用 Ontology formula（白名单编译 + field_mapping 落物理列）；required_filters 自动注入 WHERE；目标按 dt 分区；跨域指标自动 CTE 合并（与翻译引擎多指标策略一致）。
-- **modeling_plan**：变更清单（create / add_field / modify_logic / register）→ **配对 {DDL, ETL} 列表**——工具层强制：新增/加字段事实表必须 DDL 与 ETL 成对（N 表 = N 对，`summary.paired` 校验）；modify_logic 仅 ETL；register 仅注册项；DIM 维表无需 ETL；每个变更带 `editable` 字段供确认环节逐项编辑；数量不一致/缺 DWD 源等明确报错，不静默产出不完整方案。
+- **etl_gen**：生成 **Spark SQL INSERT OVERWRITE 聚合脚本**——源=目标对象同 owner 的 DWD 明细；指标公式复用 Ontology formula（白名单编译 + field_mapping 落物理列）；required_filters 自动注入 WHERE；目标按 dt 分区；跨域指标自动 CTE 合并（与翻译引擎多指标策略一致）。
+- **modeling_plan**：变更清单（create / add_field / modify_logic / register）→ **配对 {DDL, ETL} 列表**——新增/加字段事实表必须 DDL 与 ETL 成对（N 表 = N 对，`summary.paired` 校验）；modify_logic 仅 ETL；register 仅注册项；DIM 维表无需 ETL；每项带 `editable` 字段供逐项编辑；数量不一致/缺 DWD 源等明确报错，不静默产出不完整方案。
 
 ### 3.8 `query_token.py`（75 行）+ `confirm_token.py`（80 行）+ `audit.py`（62 行）+ `runtime_log.py`（64 行）—— 安全与可观测
-
 详见第 5 章「安全模型」。
 
 ---
 
 ## 4. 工具面：`mcp_servers/server.py`（14 个工具）
 
-server 启动流程：`setup_runtime_logger` → 构建 Ontology/Validator/Translator/Executor/MetadataService → `run_startup_checks`（fail-fast，逐项写运行日志）→ 初始化双令牌存储（QueryTokenStore / ConfirmTokenStore）→ `setup_audit_logger` → FastMCP("data-agent")。所有工具经 `@_audit_tool` 包装（`functools.wraps` 保留签名供 FastMCP 生成 schema；记录耗时/成败/入参摘要/结果规模，审计失败不影响主流程）。
+server 启动：`setup_runtime_logger` → 构建 Ontology/Validator/Translator/Executor/MetadataService → `run_startup_checks`（fail-fast）→ 初始化双令牌存储 → `setup_audit_logger` → FastMCP("data-agent")。所有工具经 `@_audit_tool` 包装（保留签名供 schema 生成；记录耗时/成败/入参摘要/结果规模，审计失败不影响主流程）。
 
 | 工具 | 层 | 输入→输出 | 说明 |
 |------|----|----------|------|
@@ -254,25 +229,21 @@ server 启动流程：`setup_runtime_logger` → 构建 Ontology/Validator/Trans
 问题：`execute_sql` 若接受任意 SQL，调用方可绕过翻译引擎（semantic_translate）直接查询物理表——行级权限、表选择、required_filter 全部形同虚设。
 
 方案（`core/query_token.py`，进程内内存存储，无落盘）：
-- `semantic_translate` 翻译成功 → `_token_store.issue(tr["sql"])` 签发 query_token（绑定 **SQL 原文** + TTL）。
-- `execute_sql` 必须携带 → `_token_store.verify(query_token, sql)`：令牌不存在 / 已过期 / **SQL 与签发时不一致** 均拒绝（`"SQL 与 query_token 不匹配：禁止绕过翻译引擎执行 SQL"`）。
+- `semantic_translate` 翻译成功 → `_token_store.issue(tr["sql"])` 签发 query_token（绑定 **SQL 原文** + TTL）；`execute_sql` 必须携带 → `verify`：令牌不存在 / 已过期 / **SQL 与签发时不一致** 均拒绝。
 - 安全属性：短 TTL（默认 300s，`DATA_AGENT_TOKEN_TTL`）+ 惰性 GC；容量上限 500（超出淘汰最旧）；单令牌可多次执行（幂等只读）；重启即失效。
 
 ### 5.2 确认令牌 confirm_token（P4）—— 防跳过用户确认
 
 问题：persona/skill 要求查询先 mql_explain 展示口径再请用户确认，但工具层不强制——agent 可能跳过确认直接翻译。
 
-方案（`core/confirm_token.py`）：
-- `mql_explain(mql)` 成功 → `_confirm_store.issue(mql)` 签发 confirm_token（绑定 **MQL 指纹**：metrics/dimensions/filters/time_range 的确定性 SHA-256 摘要 + TTL）。
-- `semantic_translate(mql, confirm_token=...)` 必须携带 → 指纹校验：**MQL 变更（指纹变化）必须重新 explain**，否则拒绝。TTL 默认 600s，容量 200。
+方案（`core/confirm_token.py`）：`mql_explain(mql)` 成功 → 签发 confirm_token（绑定 **MQL 指纹**：metrics/dimensions/filters/time_range 的确定性 SHA-256 摘要 + TTL）；`semantic_translate` 必须携带 → 指纹校验：**MQL 变更（指纹变化）必须重新 explain**，否则拒绝。TTL 默认 600s，容量 200。
 
 分工闭环：`confirm_token` 管「MQL → 翻译」（防跳过确认）；`query_token` 管「SQL → 执行」（防绕过翻译）——两段式闸门把安全从 prompt 约束升级为**工具层强制**。
 
 ### 5.3 审计日志 audit.jsonl + 运行日志 runtime.jsonl
 
-- **audit（P0-3，`core/audit.py`）**：所有工具调用经 `@_audit_tool` 落一行 JSON 到 `backend/logs/audit.jsonl`——字段 `ts / tool / action / outcome / elapsed_ms / args 摘要 / result 摘要`；**记录「查询意图」与「结果规模」，不记录敏感原始数据**（SQL 只记 SHA-256 指纹前缀、结果集只记行数/截断/列名）；`RotatingFileHandler` 轮转（单文件 10MB × 7 份，`DATA_AGENT_AUDIT_*` 可配）；写失败静默降级打 stderr，绝不影响取数主链路。
-- **runtime（P2，`core/runtime_log.py`）**：运行态日志 `runtime.jsonl`（事件：启动自检 startup_check_ok/failed、启动警告、异常等），面向排障；同一套轮转策略。
-- **health_check**：`startup_status` 输出自检结果快照，作为排障入口。
+- **audit（P0-3，`core/audit.py`）**：所有工具调用经 `@_audit_tool` 落一行 JSON 到 `backend/logs/audit.jsonl`——字段 `ts / tool / action / outcome / elapsed_ms / args 摘要 / result 摘要`；**记录「查询意图」与「结果规模」，不记录敏感原始数据**（SQL 只记 SHA-256 指纹前缀、结果集只记行数/截断/列名）；`RotatingFileHandler` 轮转（单文件 10MB × 7 份，`DATA_AGENT_AUDIT_*` 可配）；写失败静默降级，绝不影响取数主链路。
+- **runtime（P2）**：运行态日志 `runtime.jsonl`（启动自检/警告/异常等事件），面向排障，同一套轮转策略；`health_check` 用 `startup_status` 输出自检快照作为排障入口。
 
 ### 5.4 其他安全边界（工具层强制，不依赖提示词）
 
@@ -281,7 +252,7 @@ server 启动流程：`setup_runtime_logger` → 构建 Ontology/Validator/Trans
 | 物理渗入检测 | mql_validator + translator 公式 | MQL/公式中出现物理表名/列名即拒绝 |
 | 只读执行 + 行数上限 | executor FORBIDDEN 正则 + SQLite mode=ro + MAX_ROWS=1000 | 禁写禁 DDL（远程方言同样拦截），fetchmany(1001) 判截断 |
 | 行级权限 | translator `_permission_clause` | user.region_ids → F.perm_column IN(...)，mandatory 注入；无 perm_column 的表在选表阶段即排除 |
-| 公式白名单 | `_compile_formula` | 仅 SUM/COUNT/AVG/MAX/MIN/DISTINCT + 属性名 + 运算符 |
+| 公式白名单 | `_compile_formula` | 仅白名单函数 + 属性名 + 运算符 |
 
 ---
 
@@ -308,8 +279,6 @@ server 启动流程：`setup_runtime_logger` → 构建 Ontology/Validator/Trans
 | **新建/建模** | 新建表/ETL/指标维度/本体（含"缺指标维度要求新建"） | D → modeling-etl → modeling-workflow（进入后第一步先输出完整需求识别清单再整体确认） |
 | **其他操作** | 修改 ETL/调度参数/调整口径等存量变更 | 直接调用对应 MCP（etl_generate / scheduler_submit 等），遵守工具约束与审批 |
 
-> 判定要点：**取数 vs 元数据咨询**的区别是「要数值结果」还是「要元信息」——"查 GMV" = 取数；"GMV 怎么算 / 哪张表有 GMV" = 元数据咨询。无法归类的复杂请求：先 metadata_search 查重再归类，仍无法归类则向用户澄清，不臆断。
-
 ### 6.3 8 个 skills（路径闭环）
 
 | Skill | 对应路径 | 职责 |
@@ -330,26 +299,25 @@ server 启动流程：`setup_runtime_logger` → 构建 Ontology/Validator/Trans
 | 0 需求分析 | 需求识别提取表（可编辑草稿，每项带**来源**：需求文档/用户input/待确认） | 清单确认协议：一次整体确认 |
 | 1 方案设计 | 建模方案书（查重 + 现状对照 + 变更评估，可编辑） | 清单确认协议 |
 | 2/3 方案落地 | **配对 DDL+ETL 列表**（modeling_plan，`summary.paired` 必须 True）+ 本体注册项 | N 表=N 对，一次整体确认 |
-| 4 测试 | 测试报告（Golden 用例 + 数据质量检查） | 测试结论确认 |
-| 5 上线 | 发布记录（变更清单/DDL 执行/回滚方案） | 上线确认 |
+| 4/5 测试与上线 | 测试报告（Golden+DQC）；发布记录（变更清单/DDL 执行/回滚方案） | 测试结论/上线确认 |
 | 6 调度 | 调度配置（cron/依赖/告警/幂等键；scheduler_submit 预留） | 调度参数确认 |
-| 7 SLA/DQC | 治理配置（产出时间点/空值率/主键唯一性/波动阈值） | 治理规则确认（预留接数据质量平台） |
+| 7 SLA/DQC | 治理配置（产出时间点/空值率/主键唯一性/波动阈值；预留接数据质量平台） | 治理规则确认 |
 
 **清单确认协议（全局统一）**：① 先输出完整清单（markdown，每项带编号）一次展示全部 → ② 再调用**一次** `ask_user_question`：「以上清单请整体确认，或指出要修改的项（编号+新内容）」，选项 `[整体确认 (Recommended), 我要修改（回复编号+新值）, 增补信息]` → ③ 用户回复修改 → 更新清单 → 重新输出全文 → 再整体确认，直到确认 → ④ **禁止**把同一清单拆成多次单问选择题、禁止每次只展示一项。核心原则：**每个阶段先产出逻辑报告 → 用户整体确认 → 才调用 MCP 真实执行**。
 
 ### 6.5 setup_dsh.py / install.sh
 
-- **setup_dsh.py** 三模式（幂等）：`install`（补 dsh-mcp-client 依赖 + upsert cordis.patch.yml 的 data-agent 块 + 复制 preset 并替换 `{{BACKEND}}`）/ `update`（备份覆盖预设）/ `uninstall`（移除 patch 块 + 删除预设）。patch 块用 `- insert:` 包裹（顶层裸条目会被 loader 静默跳过——历史踩坑）；stdio spawn 用绝对路径 + 显式 `cwd` 指向 backend（host cwd 是 profile 目录）。
-- **install.sh** 子命令：`install/--sample`（建 backend/.venv + 重建样例库 + 配置 DSH）/ `--real`（真实数仓模式，配 .env + builder 生成本体）/ `update`（git pull → 重建样例库 → 更新 DSH 配置 → 评测门禁）/ `uninstall`。统一 `uv run --project backend` 单一入口。
+- **setup_dsh.py** 三模式（幂等）：`install`（补 dsh-mcp-client 依赖 + upsert cordis.patch.yml 块 + 复制 preset 替换 `{{BACKEND}}`）/ `update`（备份覆盖预设）/ `uninstall`。patch 块用 `- insert:` 包裹（顶层裸条目会被 loader 静默跳过——历史踩坑）；stdio spawn 用绝对路径 + 显式 `cwd` 指向 backend。
+- **install.sh** 子命令：`install/--sample` / `--real`（配 .env + builder 生成本体）/ `update`（git pull → 重建样例库 → 更新 DSH 配置 → 评测门禁）/ `uninstall`；统一 `uv run --project backend` 单一入口。
 
 ---
 
 ## 7. 数据与评测
 
 - **seed**：15 表（DWD×4/DWS×4/ADS×3/DIM×4），统一 `dt` 分区，字段跨层冗余；**DWS/ADS 由 DWD 用 SQL 聚合生成**（三层口径一致，评测可交叉验证）；固定种子 42 可复现；10% 无效单让过滤有意义；近 90 天数据。
-- **builder**：PRAGMA 读表结构 → 推断对象/映射/关系候选/粒度 → YAML 骨架（**人工补** description/指标 formula/join_key 核对）。
+- **builder**：PRAGMA 读表结构 → 推断对象/映射/关系候选/粒度 → YAML 骨架（人工补 description/指标 formula/join_key 核对）；换主题时辅助生成本体。
 - **eval**：21 条金标准（基础取数 / 多指标同域+跨域 / 指标族变体 / 行级权限 / 负例），断言：校验/表选择/可执行/行数/结果列/多表合并；通过率 ≥90% 门禁（当前 21/21 100%）；GitHub Actions CI（seed 重建 → eval → 引擎单测 → DSH 侧回归）。
-- **tests**：6 个文件 58 项全部通过——test_security 10（确认令牌 5 + 搜索索引 5）/ test_dialects 5（远程执行器）/ test_observability 6（启动自检 4 + 运行日志轮转 2）/ test_metadata 11 / test_modeling 13（DDL 5 + ETL 5 + 模板 3）/ test_modeling_plan 13（配对 9 + 可编辑交互 4）。
+- **tests**：6 个文件 58 项全部通过（test_security 10 / test_dialects 5 / test_observability 6 / test_metadata 11 / test_modeling 13 / test_modeling_plan 13）。
 
 ---
 
@@ -360,20 +328,14 @@ server 启动流程：`setup_runtime_logger` → 构建 Ontology/Validator/Trans
 ```
 ① 用户提问 ──▶ DSH agent（数据助理预设）
 ② plan-routing：意图分类（四类）→ 路径选择（A/元数据/D/其他）
-③ path-a：oag-retrieval skill
-     Step0 term_normalize（黑话→标准术语，记录回译映射）
-     Step1 ontology_search（实体/指标定位）
-     Step2 版本解析 / metric_disambiguate（口径确认）
-     Step3 ontology_traverse（关系图：join_key/required_filter）
+③ path-a：oag-retrieval（Step0 term_normalize 归一 → Step1 ontology_search 定位 →
+     Step2 版本/口径确认 → Step3 ontology_traverse 关系图：join_key/required_filter）
 ④ mql-authoring：生成 MQL → mql_validate 校验
 ⑤ mql_explain → 中文确认信息 + confirm_token → ask_user_question 用户确认
 ⑥ semantic_translate(mql, confirm_token=…)（确定性翻译：权限注入/表选择/JOIN/时间/五方言）
    → 翻译成功签发 query_token（绑定 SQL）
-⑦ execute_sql(sql, query_token=…)（只读执行，限行 1000）→ 结果集
-⑧ 口径标注回答（指标名+口径+版本+公式+过滤+数据区间）
+⑦ execute_sql(sql, query_token=…)（只读，限行 1000）→ 结果集 → ⑧ 口径标注回答（指标名+口径+版本+公式+过滤+数据区间）
 ```
-
-> 双令牌两段式闸门：⑤→⑥ 由 confirm_token 强制「确认过的查询才能翻译」（MQL 变更指纹失效需重新 explain）；⑥→⑦ 由 query_token 强制「翻译过的 SQL 才能执行」（换 SQL/裸 SQL 一律拒绝）。
 
 ### 8.2 逐步责任矩阵
 
@@ -392,28 +354,22 @@ server 启动流程：`setup_runtime_logger` → 构建 Ontology/Validator/Trans
 用户：**「华东区数码类产品的 GMV，按门店城市拆分，最近 30 天」**（golden #3）
 
 ```
-② plan：取数 → 路径 A（指标 gmv/维度 city 均已注册）
-③ 黑话归一：无黑话；实体 Product(数码)/Region(华东)/Store(城市)；指标 gmv
-   关系扩展：Payment --product_id--> Product / --store_id--> Store / --region_id--> Region
-④ MQL：{metrics:[gmv], dimensions:[city], filters:[product_type=数码, region_name=华东],
-         time_range:-30d~today} → mql_validate ok
+②③ plan/理解：路径 A；无黑话；实体 Product(数码)/Region(华东)/Store(城市)；指标 gmv
+   关系扩展：Payment--product_id-->Product / --store_id-->Store / --region_id-->Region
+④ MQL：{metrics:[gmv], dimensions:[city], filters:[product_type=数码, region_name=华东], time_range:-30d~today} → mql_validate ok
 ⑤ mql_explain → 「GMV（支付口径 v1.0：SUM(pay_amount)，过滤 is_valid=1）按门店城市分组，
    过滤产品类型=数码/区域=华东，时间 -30d~today」+ confirm_token → 用户确认
 ⑥ semantic_translate(confirm_token=…)：
    表选择 → ads/dws 无 city/product_type/region_name → 排除；dwd_ord_pay_di（joinable）→ 命中
-   JOIN 链 → dim_product P / dim_store S / dim_region R；权限 → 注入 F.region_id IN(...)
+   JOIN 链 → dim_product P / dim_store S / dim_region R；权限 → F.region_id IN(...)；
    时间 → F.dt BETWEEN strftime('%Y%m%d',date('now','-30 days')) AND strftime('%Y%m%d','now')
-   产出 SQL：
-     SELECT (SUM(F.pay_amt)) AS gmv, S.city AS city
-     FROM dwd_ord_pay_di F
-     JOIN dim_product P ON P.product_id = F.product_id
-     JOIN dim_store S ON S.store_id = F.store_id
-     JOIN dim_region R ON R.region_id = F.region_id
-     WHERE F.is_valid = 1 AND P.product_type='数码' AND R.region_name='华东'
-       AND F.dt >= ... AND F.dt <= ...
-     GROUP BY S.city ORDER BY gmv DESC
+   产出 SQL：SELECT (SUM(F.pay_amt)) AS gmv, S.city AS city FROM dwd_ord_pay_di F
+     JOIN dim_product P ON P.product_id=F.product_id JOIN dim_store S ON S.store_id=F.store_id
+     JOIN dim_region R ON R.region_id=F.region_id
+     WHERE F.is_valid=1 AND P.product_type='数码' AND R.region_name='华东'
+       AND F.dt >= ... AND F.dt <= ... GROUP BY S.city ORDER BY gmv DESC
    → 翻译成功，签发 query_token
-⑦ execute_sql(sql, query_token=…) → 示例 [{上海: 37550.67}, {南京: 31598.79}, {杭州: 22926.65}, {苏州: 39312.36}]（固定种子 42，数值随日期变化）
+⑦ execute_sql(sql, query_token=…) → 示例 [{上海: 37550.67}, {南京: 31598.79}, {杭州: 22926.65}, {苏州: 39312.36}]
 ⑧ 回答 → 「GMV（支付口径 v1.0，过滤 is_valid=1，数据区间 -30d~today）上海 37,550.67 元 / …」
 ```
 
@@ -423,9 +379,7 @@ server 启动流程：`setup_runtime_logger` → 构建 Ontology/Validator/Trans
 
 ```
 MQL：{metrics:[gmv, refund_amount], dimensions:[store_type], time_range:-30d~today}
-翻译引擎：
-  按 owner 分组 → {Payment:[gmv], Refund:[refund_amount]} → 跨 owner
-  每个 owner 生成子查询（各自选表+JOIN dim_store）：
+翻译引擎：按 owner 分组 → {Payment:[gmv], Refund:[refund_amount]} → 跨 owner，各生成子查询：
     WITH _m0 AS (SELECT SUM(F.pay_amt) AS gmv, S.store_type FROM dwd_ord_pay_di F
                  JOIN dim_store S ... GROUP BY S.store_type),
          _m1 AS (SELECT SUM(F.refund_amt) AS refund_amount, S.store_type FROM dwd_ord_refund_di F
@@ -440,9 +394,8 @@ MQL：{metrics:[gmv, refund_amount], dimensions:[store_type], time_range:-30d~to
 用户：**「华东区 poi 的 goods 销售额，按门店类型拆」**
 
 ```
-③ Step0 term_normalize → "华东区 门店 的 产品 gmv，按门店类型拆"
-    mappings: [poi→门店, goods→产品, 销售额→gmv]
-③ metric_disambiguate("销售额") → 黑话命中 → exact gmv（支付口径，族默认）
+③ Step0 term_normalize → "华东区 门店 的 产品 gmv，按门店类型拆"（mappings: poi→门店, goods→产品, 销售额→gmv）
+   metric_disambiguate("销售额") → 黑话命中 → exact gmv（支付口径，族默认）
 ④ MQL → ⑤ mql_explain 确认（标注支付口径）+ confirm_token → ⑥⑦ 执行
 ⑧ 回答用词跟随用户：用「门店」回译（而非标准名 Store）
 ```
@@ -454,13 +407,12 @@ MQL：{metrics:[gmv, refund_amount], dimensions:[store_type], time_range:-30d~to
 ```
 ② plan：意图=元数据咨询（要元信息，不要数值）→ metadata_search
 ③ metadata_search("ads_ord_gmv_1d") →
-    tables: [{table, layer: ADS, layer_cn: 应用层, granularities: [day],
+    tables: [{layer: ADS, layer_cn: 应用层, granularities: [day],
               pre_aggregated: [gmv, order_count, refund_amount], fields: [...]}]
     metrics: [{name: gmv, formula: SUM(pay_amount), required_filters: [is_valid=1],
                version: v1.0, family: gmv, variant_label: 支付口径}]
-    lineage: {source: dwd_ord_pay_di, logic: "按 dt 聚合：GMV（SUM(pay_amt)，过滤 is_valid=1）"}
-    readiness: {ready_partition: t-1（昨日）}
-④ 按 mapping 解读回答（可补充 ontology_search/traverse 口径细节）；不产生数值结果
+    lineage: {source: dwd_ord_pay_di, logic: "按 dt 聚合：GMV（SUM(pay_amt)，过滤 is_valid=1）"}；readiness: {t-1（昨日）}
+④ 按 mapping 解读回答；不产生数值结果
 ```
 
 ### 8.7 ETL 路径 D 走查（阶段化 + 配对）
@@ -471,19 +423,17 @@ MQL：{metrics:[gmv, refund_amount], dimensions:[store_type], time_range:-30d~to
 plan → 意图=新建/建模 → 路径 D（modeling-etl → modeling-workflow）
 阶段0 需求分析：ontology_search 查重（复购率未注册）→ 输出需求识别提取表（编号+来源）
      → 一次整体确认（缺口径/粒度先澄清，不臆造）
-阶段1 方案设计：现状对照（完全新增）→ 输出建模方案书（变更清单编号）→ 整体确认
+阶段1 方案设计：现状对照（完全新增）→ 建模方案书（变更清单编号）→ 整体确认
 阶段2/3 落地：modeling_plan([{type: create, obj_name: Order, layer: ADS,
-              subject: repurchase, metrics: [order_count], dimensions: [order_date(week)]}])
-     → 返回配对 {DDL: CREATE TABLE ... ads_ord_repurchase_1d ... PARTITIONED BY (dt STRING),
+              subject: repurchase, metrics: [order_count]}])
+     → 配对 {DDL: CREATE TABLE ... ads_ord_repurchase_1d ... PARTITIONED BY (dt STRING),
                  ETL: INSERT OVERWRITE TABLE ads_ord_repurchase_1d PARTITION (dt)
                       SELECT F.dt, ... FROM dwd_ord_order_di F WHERE F.is_valid=1 GROUP BY F.dt}
      → summary.paired=True（N 表 = N 对）→ 输出 {DDL,ETL} 对清单 → 一次整体确认
      → register 项：编辑 backend/ontology/ 注册对象/指标 → 展示注册项清单 → 整体确认
-阶段4 测试：Golden 用例 + DQC（空值/主键唯一/行数波动）→ 测试报告 → 整体确认
-阶段5 上线：发布记录（DDL 执行/回滚方案）→ 整体确认
-阶段6 调度：scheduler_submit(task_spec) → 【预留】返回「未接入平台 MCP（mcp-scheduler）」
-阶段7 SLA/DQC：产出治理配置 → 整体确认 → 登记（预留接数据质量平台）
-全程审计日志留痕
+阶段4-7：测试（Golden+DQC）→ 上线（发布/回滚）→ 调度（scheduler_submit 预留）→
+   SLA/DQC（治理配置登记，预留）——每阶段先出报告 → 清单确认协议 → 确认后执行；
+   全程审计日志留痕
 ```
 
 ### 8.8 异常链路
@@ -492,13 +442,11 @@ plan → 意图=新建/建模 → 路径 D（modeling-etl → modeling-workflow�
 |------|------|
 | MQL 物理渗入（用户说 dwd_xxx/pay_amt） | validator 拒绝 → agent 修正为业务属性或反问 |
 | 指标未注册（"客户满意度"） | validator 拒绝 → 候选列表 → 澄清 |
-| 表选择失败（粒度/维度不可覆盖） | translator 返回 error → 走降级链（映射缺失→治理建议；探索性→受限兜底） |
-| 有行级权限但只有 ads 表 | 表选择排除无 perm_column 的表 → 回落 dws/dwd |
+| 表选择失败 / 有行级权限但只有 ads 表 | translator 返回 error → 降级链（映射缺失→治理建议；探索性→受限兜底）；表选择排除无 perm_column 的表 → 回落 dws/dwd |
 | 取数缺指标/维度 | 告知缺失 + 询问是否新建（是走 D / 否结束）；**禁止近似替代**；拒绝新建且显式同意 → explore-fallback（受限，标记"非注册口径"） |
 | confirm_token 缺失/过期/MQL 变更 | semantic_translate 拒绝 → 重新 mql_explain |
 | query_token 缺失/过期/SQL 不符 | execute_sql 拒绝 → 重新 semantic_translate |
-| 远程方言 + sqlite 介质 | executor 明确报「介质不匹配，请在 .env 配置 DATA_AGENT_DSN_<方言>」 |
-| 远程方言缺驱动 / 未配置 DSN | 报错并给出安装指引（uv pip install pymysql / pyhive thrift sasl）或配置项名 |
+| 远程方言 + sqlite 介质 / 缺驱动 / 未配置 DSN | 明确报「介质不匹配」/ 给出安装指引（uv pip install pymysql / pyhive thrift sasl）/ 指出配置项名 |
 | 多版本对象无默认 | resolve_version 返回 None → agent 反问用户 |
 | 建模配对数量不一致（2 DDL / 1 ETL） | modeling_plan summary.paired=False + errors → 先解决再继续，禁止落地不完整方案 |
 
@@ -509,51 +457,36 @@ plan → 意图=新建/建模 → 路径 D（modeling-etl → modeling-workflow�
 ### 9.1 表选择决策算法（`_select_table_multi`）
 
 ```
-候选过滤：粒度覆盖（_gran_ok：gran∈表粒度 或 day 可聚合成更大粒度）
-         × 权限（perm_rids 时须有 perm_column）
-         × 指标覆盖（非预聚合指标必须落明细表）
-         × 维度覆盖（direct：available_dims 全含；或 joinable：明细表可 JOIN 维度表）
-分桶：cands_preagg（预聚合表全指标覆盖+维度直连）vs cands_detail（明细表公式）
-选表：preagg 优先（gold > ADS/DWS 层序）；否则 detail（gold 优先）
-失败：raise → 降级链
+候选过滤：粒度覆盖（gran∈表粒度 或 day 可聚合成更大粒度） × 权限（perm_rids 须有
+         perm_column） × 指标覆盖（非预聚合指标必须落明细表） × 维度覆盖
+         （direct：available_dims 全含；或 joinable：明细表可 JOIN 维度表）
+分桶：cands_preagg（预聚合全指标覆盖+维度直连） vs cands_detail（明细表公式）；选表：preagg
+优先（gold > ADS/DWS 层序），否则 detail；失败 → 降级链——体现「月表答不了周查」「有权限时 ads 表不可用」。
 ```
-体现「月表答不了周查」「有权限时 ads 表不可用」等真实场景。
 
-### 9.2 JOIN 链构建与别名
-- `_build_joins`：对每个 needed 维度属性 → `join_path` BFS → 逐 hop `JOIN {dim表} {别名} ON {别名}.{join_key} = {父别名}.{join_key}`，同表只 JOIN 一次。
-- 别名：事实表固定 `F`；维度对象别名由 loader **动态生成**（仅 DIM 层、首字母大写、避开 F、冲突加序号）——主题无关且确定性。
+### 9.2 JOIN 链构建、别名与公式白名单
+- `_build_joins`：对每个 needed 维度属性 → `join_path` BFS → 逐 hop `JOIN {dim表} {别名} ON {别名}.{join_key} = {父别名}.{join_key}`，同表只 JOIN 一次；事实表固定 `F`，维度别名由 loader **动态生成**（仅 DIM 层、首字母大写、避开 F、冲突加序号）。
+- `_compile_formula` 三重防护：① 属性名 → `F.{物理列}`（查所选表 field_mapping，不依赖全局注册）；② 移除 `F.xxx` 后仅允许 `SUM/COUNT/AVG/MAX/MIN/DISTINCT`；③ 物理表名正则兜底。杜绝公式注入与幻觉列。
 
-### 9.3 公式编译白名单（`_compile_formula`）
-1. 属性名 → `F.{物理列}`（查所选表 field_mapping，不依赖全局注册）；
-2. 移除 `F.xxx` 后剩余标识符仅允许 `SUM/COUNT/AVG/MAX/MIN/DISTINCT`；
-3. 物理表名正则兜底。
-三重防护，杜绝公式注入与幻觉列。
-
-### 9.4 多指标合并
-- 同 owner：单表多列（全预聚合 或 全明细公式）。
-- 跨 owner：CTE（`WITH _m0 AS(...), _m1 AS(...)`）+ 按共同维度 `FULL OUTER JOIN`（COALESCE 对齐）；无维度 `CROSS JOIN` 单行标量。
+### 9.3 多指标合并
+- 同 owner：单表多列（全预聚合 或 全明细公式）；跨 owner：CTE（`WITH _m0 AS(...), _m1 AS(...)`）+ 按共同维度 `FULL OUTER JOIN`（COALESCE 对齐），无维度 `CROSS JOIN` 单行标量。
 - **无维度时预聚合列包 `SUM()`** 跨分区聚合（否则返回逐分区多行，语义错误）。
 
-### 9.5 时间系统（五方言）
+### 9.4 时间系统（五方言）
 - 缺省 → `dt = 昨天`（t-1）；相对表达式（`-30d`/`today`/`last_month_start`/`last_month_end`）→ SQL；具体日期 `YYYY-MM-DD`/`YYYYMMDD` → 字面量。
-- 时间表达式（TIME_EXPRS）按方言注册：sqlite 用 `strftime`/`date('now',...)`；mysql/doris 用 `DATE_FORMAT`/`DATE_SUB(CURDATE(),...)`；hive 用 `FROM_UNIXTIME(UNIX_TIMESTAMP()-n*86400)`；sparksql 用 `DATE_FORMAT(CURRENT_DATE)`/`DATE_SUB(CURRENT_DATE, n)`。
-- 粒度分组（GRAN_EXPRS）：sqlite 用 `substr` 字符串运算 + 自定义 `iso_week()` 函数（SQLite 无法解析 `YYYYMMDD` 紧凑格式）；mysql/doris 用 `DATE_FORMAT('%x-W%v')`；hive/sparksql 用 `WEEKOFYEAR()`。
+- 时间表达式（TIME_EXPRS）与粒度分组（GRAN_EXPRS）按方言注册：sqlite 用 `strftime`/`substr` + 自定义 `iso_week()`（SQLite 无法解析 `YYYYMMDD` 紧凑格式）；mysql/doris 用 `DATE_FORMAT`/`DATE_SUB(CURDATE(),...)`（周 `%x-W%v`）；hive 用 `FROM_UNIXTIME(UNIX_TIMESTAMP()-n*86400)`；sparksql 用 `DATE_FORMAT(CURRENT_DATE)`/`DATE_SUB(CURRENT_DATE, n)`（hive/sparksql 周用 `WEEKOFYEAR()`）。
 
-### 9.6 权限注入（步骤 0）
-`user.region_ids` → `F.{perm_column} IN (...)`，作为 mandatory_clause 注入 WHERE，**不可跳过**；无 perm_column 的表在选表阶段即被排除。
+### 9.5 权限注入（步骤 0）与物理渗入检测
+- 权限：`user.region_ids` → `F.{perm_column} IN (...)`，mandatory 注入 WHERE，**不可跳过**；无 perm_column 的表在选表阶段即被排除。
+- 渗入检测：物理表名 → 前缀正则（`dwd_/dws_/ads_/dim_/ods_`）；物理列名 → `physical_names` 精确集合（**减业务名**避免误伤 `order_user_cnt`），比后缀正则更精确、主题无关。
 
-### 9.7 物理渗入检测（精确集合 vs 正则）
-物理表名 → 前缀正则（`dwd_/dws_/ads_/dim_/ods_`，兜底强信号）；物理列名 → `physical_names` 精确集合（从 Ontology 收集，**减业务名**避免误伤 `order_user_cnt`）。比后缀正则更精确、主题无关。
+### 9.6 指标族三级识别（`metric_disambiguate`）
+黑话命中（glossary type=metric）→ 口径词命中（"下单GMV"→variant_label）→ 精确指标名 → 族匹配（variants+差异+default，status=family/exact/both）→ 候选。skill 侧：明示口径用变体；只说族名用默认+标注；问差异则召回确认。
 
-### 9.8 指标族三级识别（`metric_disambiguate`）
-黑话命中（glossary type=metric）→ 口径词命中（"下单GMV"→variant_label 匹配）→ 精确指标名 → 族匹配（返回 variants+差异+default，status=family/exact/both）→ 候选（status=none）。
-skill 侧决策：明示口径用变体；只说族名用默认+标注；问差异则召回确认。
+### 9.7 术语归一与回译（`normalize_terms`）
+最长匹配（词长降序）；只收录"真黑话"（标准名自身不替换）；归一目标 = 展示名（对象用中文 display_name）；回译：mappings 保留 raw→display，回答用词跟随用户。
 
-### 9.9 术语归一与回译（`normalize_terms`）
-- 最长匹配（词长降序）；只收录"真黑话"（标准名自身不替换）；归一目标 = 展示名（对象用中文 display_name）。
-- 回译：mappings 保留 raw→display，回答用词跟随用户。
-
-### 9.10 方言系统与 DIALECT_VERIFIED
+### 9.8 方言系统与 DIALECT_VERIFIED
 ```python
 DIALECT_VERIFIED = {"sqlite": True, "mysql": False, "doris": False,
                     "hive": False, "sparksql": False}
@@ -562,13 +495,12 @@ DIALECT_VERIFIED = {"sqlite": True, "mysql": False, "doris": False,
 - 远程四方言**翻译已映射**（TIME_EXPRS/GRAN_EXPRS 全表）并由 test_dialects 快照测试锁定（5 个测试覆盖各用例在五方言下的关键特征），但 `dialect_verified=False`——执行需 `DATA_AGENT_DSN_<方言>` 接入驱动（pymysql / pyhive thrift）后逐个点亮。
 - executor 方言与介质解耦：远程方言 + .db 介质明确报错；缺 DSN/缺驱动/不支持的 scheme 均有可操作提示。**消除"远程方言已支持"的误导**。
 
-### 9.11 版本解析（`resolve_version`）
+### 9.9 版本解析（`resolve_version`）
 单版本直取 / `default_version` / None（调用方反问）。与指标族（并行口径）互补：前者是时间演进，后者是并行口径。
 
-### 9.12 双令牌实现细节
-- confirm_token：指纹 = metrics/dimensions/filters/time_range 的规范 JSON → SHA-256 前 16 位；签发/校验带惰性 GC 与容量上限（200），指纹不匹配即要求重新 explain。
-- query_token：绑定 SQL 原文（`entry.sql != sql` 即拒绝）；`secrets.token_hex(16)` 不可预测；TTL 300s；审计中只记录 `fingerprint(sql)`（SHA-256 前 12 位）而非 SQL 原文。
-- 两者均为**进程内内存存储**：重启即失效，无落盘风险；单令牌可重复使用（幂等只读）。
+### 9.10 双令牌实现细节
+- confirm_token：指纹 = metrics/dimensions/filters/time_range 的规范 JSON → SHA-256 前 16 位，不匹配即要求重新 explain；query_token：绑定 SQL 原文（`entry.sql != sql` 即拒绝），`secrets.token_hex(16)` 不可预测，审计只记 `fingerprint(sql)` 前缀。
+- 两者均为**进程内内存存储**：TTL 300/600s、惰性 GC、容量上限（500/200）、重启即失效；单令牌可重复使用（幂等只读）。
 
 ---
 
@@ -587,10 +519,8 @@ DIALECT_VERIFIED = {"sqlite": True, "mysql": False, "doris": False,
 | 版本三级规则 | resolve_version | ✅ |
 | 多口径指标族 | family + metric_disambiguate | ✅ |
 | 业务黑话 | glossary + term_normalize + 回译 | ✅ |
-| 查询令牌（防绕过翻译） | query_token + execute_sql 校验 | ✅（P0） |
-| 确认令牌（防跳过确认） | confirm_token + semantic_translate 校验 | ✅（P4） |
-| 审计日志 | audit.jsonl（轮转）+ @_audit_tool | ✅（P0） |
-| 运行日志 + 启动自检 + health_check | runtime.jsonl + startup_check | ✅（P2） |
+| 双令牌（防绕过翻译/防跳过确认） | query_token + execute_sql 校验 / confirm_token + semantic_translate 校验 | ✅（P0/P4） |
+| 审计日志 + 运行日志 + 启动自检 | audit.jsonl / runtime.jsonl（轮转）+ @_audit_tool + health_check | ✅（P0/P2） |
 | 四类意图路径 | plan-routing（取数/元数据/新建/其他） | ✅ |
 | 元数据检索 | metadata_search（可替换真实接口） | ✅ |
 | 路径 D 阶段化 | modeling-workflow 阶段 0-7 + 清单确认协议 | ✅ |
@@ -599,8 +529,7 @@ DIALECT_VERIFIED = {"sqlite": True, "mysql": False, "doris": False,
 | ETL 调度 | scheduler_submit | ⚠️ 预留 |
 | Skill 体系 | 8 skills | ✅ |
 | 评测门禁 | 21 条 + CI + 58 项单测 | ✅ |
-| 五职能 Agent | 主 agent + skills | ⚠️ 精简（符合 §11.6） |
-| 反馈飞轮 | 未接 | 🔲 |
+| 五职能 Agent / 反馈飞轮 | 主 agent + skills / 未接 | ⚠️ 精简 / 🔲 |
 | 真实数仓执行 | _execute_remote + 四方言驱动 | 🔲 接入 DSN 后点亮 |
 
 ---
@@ -610,20 +539,17 @@ DIALECT_VERIFIED = {"sqlite": True, "mysql": False, "doris": False,
 **简化点（⚠️）**
 1. 多 Agent 未物理拆分（主 agent + skills，符合 §11.6 精简建议）。
 2. OAG 文档检索（Step 4）未实现（依赖 FAQ 库，P1 接入）。
-3. 跨 owner ≥3 指标 FULL JOIN 以首表维度为锚（2 指标完整对齐）。
-4. 行级权限只支持 `region_ids` 一维（多权限维度需扩展 perm_column 多值）。
-5. metadata_search 基于 Ontology + 样例 schema 推导（血缘/就绪时间为样例语义），非真实元数据平台数据。
+3. 跨 owner ≥3 指标 FULL JOIN 以首表维度为锚（2 指标完整对齐）；行级权限只支持 `region_ids` 一维（多权限维度需扩展 perm_column 多值）。
+4. metadata_search 基于 Ontology + 样例 schema 推导（血缘/就绪时间为样例语义），非真实元数据平台数据。
 
 **预留（🔲）**
-1. ETL 调度：`scheduler_submit` 占位，待接平台 mcp-scheduler（任务依赖/周期/告警/幂等键）。
-2. ETL 代码模板（Spark/Flink 生产化）。
-3. 反馈飞轮（dsh-message-feedback → golden 自动入库）。
-4. 真实数仓执行：`DATA_AGENT_DSN_<方言>` 接入后点亮 `dialect_verified`（mysql/doris 走 pymysql，hive/sparksql 走 pyhive Thrift）。
-5. SLA/DQC 自动登记（待接数据质量平台）。
+1. ETL 调度：`scheduler_submit` 占位，待接平台 mcp-scheduler（任务依赖/周期/告警/幂等键）；ETL 代码模板（Spark/Flink 生产化）。
+2. 反馈飞轮（dsh-message-feedback → golden 自动入库）。
+3. 真实数仓执行：`DATA_AGENT_DSN_<方言>` 接入后点亮 `dialect_verified`（mysql/doris 走 pymysql，hive/sparksql 走 pyhive Thrift）。
+4. SLA/DQC 自动登记（待接数据质量平台）。
 
 **风险点（⚠️）**
-1. JOIN 键正确性完全依赖 `relations.yaml`——错误导致「结果错误但不报错」，真实数仓接入前必须人工核对。
-2. `field_mapping` 缺列 → `KeyError`（translate 有兜底返回 error，但需留意）。
-3. week 粒度依赖 `iso_week` 方言函数（sqlite）/ `WEEKOFYEAR`（hive/sparksql）/ `%x-W%v`（mysql/doris）——切真实数仓需确认对应引擎函数。
-4. 双令牌为进程内内存存储：进程重启后 agent 长会话中的旧令牌失效，需重新 explain/translate（交互成本，非安全缺陷）。
-5. 样例库由 seed 以"今天"为锚生成，评测数值随日期变化（固定种子保证结构可复现）。
+1. JOIN 键正确性完全依赖 `relations.yaml`——错误导致「结果错误但不报错」，真实数仓接入前必须人工核对；`field_mapping` 缺列 → `KeyError`（translate 有兜底返回 error，但需留意）。
+2. week 粒度依赖 `iso_week` 方言函数（sqlite）/ `WEEKOFYEAR`（hive/sparksql）/ `%x-W%v`（mysql/doris）——切真实数仓需确认对应引擎函数。
+3. 双令牌为进程内内存存储：进程重启后 agent 长会话中的旧令牌失效，需重新 explain/translate（交互成本，非安全缺陷）。
+4. 样例库由 seed 以"今天"为锚生成，评测数值随日期变化（固定种子保证结构可复现）。
