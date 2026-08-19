@@ -46,14 +46,33 @@ from core import Executor, MqlValidator, Ontology, Translator  # noqa: E402
 from core.audit import audit, setup_audit_logger  # noqa: E402
 from core.config import CONFIG  # noqa: E402
 from core.query_token import QueryTokenStore  # noqa: E402
+from core.runtime_log import log_error, log_info, log_warn, setup_runtime_logger  # noqa: E402
+from core.startup_check import run_startup_checks, startup_status  # noqa: E402
 
 BASE = Path(os.environ.get("DATA_AGENT_BACKEND", BACKEND_ROOT))
 DB = Path(os.environ.get("DATA_AGENT_DB", BASE / "seed" / "sample.db"))
+
+# 运行日志（P2）：jsonl + 轮转（启动后立刻可用）
+setup_runtime_logger(CONFIG.log_dir, level=CONFIG.log_level,
+                     max_bytes=CONFIG.audit_max_bytes,
+                     backup_count=CONFIG.audit_backup_count)
 
 _onto = Ontology(BASE / "ontology")
 _validator = MqlValidator(_onto)
 _translator = Translator(_onto)
 _executor = Executor(str(DB))
+
+# 启动自检（P2）：fail-fast，启动即暴露配置/介质问题
+_STARTUP_CHECKS = run_startup_checks(_onto, _executor)
+for _c in _STARTUP_CHECKS:
+    if _c.ok:
+        log_info("startup_check_ok", name=_c.name, detail=_c.detail)
+    else:
+        log_error("startup_check_failed", name=_c.name, detail=_c.detail,
+                  required=_c.required)
+if not all(_c.ok for _c in _STARTUP_CHECKS if _c.required):
+    log_warn("startup_checks_partial_failure",
+             failed=[_c.name for _c in _STARTUP_CHECKS if not _c.ok])
 
 # 查询令牌存储（P0-1）：翻译签发 → 执行校验
 _token_store = QueryTokenStore(ttl_seconds=CONFIG.query_token_ttl,
@@ -92,6 +111,13 @@ def _audit_tool(fn):
                   error=str(e)[:500])
             raise
     return wrapper
+
+
+@mcp.tool()
+@_audit_tool
+def health_check() -> dict:
+    """健康检查：返回引擎状态（ontology 规模、数据介质、自检结果）。排障入口。"""
+    return startup_status(_onto, _executor)
 
 
 def _summarize_args(kwargs: dict, tool: str) -> dict:

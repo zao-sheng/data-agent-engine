@@ -107,6 +107,7 @@ git clone <repo> && cd data-agent-engine
 | ETL（路径 D） | `ddl_generate` 已实现（遵守命名规范）；调度 `scheduler_submit` 预留待接平台 MCP |
 | 查询令牌 | `semantic_translate` 签发 query_token（绑定 SQL、短 TTL），`execute_sql` 必须携带校验——禁止绕过翻译引擎执行裸 SQL（行级权限/表选择/口径过滤不可被绕过） |
 | 审计日志 | 所有 MCP 工具调用落 `backend/logs/audit.jsonl`（调用方/动作/入参摘要/耗时/结果规模），轮转清理不无限增长 |
+| 运行日志 | `backend/logs/runtime.jsonl` 记录启动自检/连接/异常等运行态，jsonl + 轮转；启动自检（ontology/介质/日志目录）fail-fast，`health_check` 工具返回引擎状态 |
 | 安全边界 | MQL 物理渗入检测（精确物理名集合）；只读执行器（禁写、行数上限）；查询令牌强制翻译→执行绑定 |
 | 主题可替换 | 引擎零主题耦合：时间维度名/分区列名由 `ontology/config.yaml` 配置 |
 | 评测门禁 | Golden Dataset 回归，通过率 ≥ 90% 才放行（CI 已配置） |

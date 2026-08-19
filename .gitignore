@@ -15,3 +15,4 @@ credentials*
 
 # OS
 .DS_Store
+backend/logs/
