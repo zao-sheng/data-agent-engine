@@ -6,7 +6,8 @@
   3. 表选择：粒度覆盖 × 维度覆盖（直连/JOIN 扩展）× 预聚合 × 权威等级
   4. JOIN 链：唯一来源是 Ontology relations（翻译引擎永不猜测 JOIN）
   5. 时间：未识别时间参数 → 默认 t-1；相对表达式 → SQL；分区列统一 dt
-  6. 方言：sqlite（默认，可执行）/ doris（映射）
+  6. 方言：sqlite（默认，可执行）/ mysql / doris / hive / sparksql
+     （远程方言翻译已映射，执行需 Executor 接入对应驱动 + .env 连接串）
   7. 多指标（MQL v1.1）：
      * 同 owner 多指标 → 单表多列（全预聚合 或 全明细公式）
      * 跨 owner 多指标 → CTE + FULL OUTER JOIN 按共同维度对齐（无维度 → CROSS JOIN 标量）
@@ -31,8 +32,94 @@ OP_SQL = {"eq": "=", "neq": "<>", "gt": ">", "gte": ">=", "lt": "<", "lte": "<="
 
 GRAN_UP = {"week", "month", "quarter", "year"}
 
-# 方言验证状态：sqlite 已实现且评测覆盖；doris 为预留映射（未启用、未验证）
-DIALECT_VERIFIED = {"sqlite": True, "doris": False}
+# 方言验证状态：sqlite 已实现且评测覆盖（含真实执行）；
+# 远程方言（mysql/doris/hive/sparksql）翻译已映射并由快照测试锁定，
+# 但执行需在真实引擎回归（dialect_verified=False，接入驱动后逐个点亮）。
+DIALECT_VERIFIED = {"sqlite": True, "mysql": False, "doris": False,
+                    "hive": False, "sparksql": False}
+
+SUPPORTED_DIALECTS = set(DIALECT_VERIFIED)
+
+# ── 方言表达式注册表（P1-5）──────────────────────────────
+# 时间表达式：t0/today/yesterday/last_month_start/last_month_end/相对 N 天
+# 说明：hive/sparksql 的日期函数与 mysql 系不同，单独映射。
+TIME_EXPRS: dict[str, dict[str, str]] = {
+    "sqlite": {
+        "today": "strftime('%Y%m%d','now')",
+        "yesterday": "strftime('%Y%m%d', date('now','-1 day'))",
+        "last_month_start": "strftime('%Y%m%d', date('now','start of month','-1 month'))",
+        "last_month_end": "strftime('%Y%m%d', date('now','start of month','-1 day'))",
+        "rel": "strftime('%Y%m%d', date('now','-{n} days'))",
+    },
+    "mysql": {
+        "today": "DATE_FORMAT(CURDATE(),'%Y%m%d')",
+        "yesterday": "DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 DAY),'%Y%m%d')",
+        "last_month_start": "DATE_FORMAT(DATE_SUB(DATE_FORMAT(CURDATE(),'%Y-%m-01'), INTERVAL 1 MONTH),'%Y%m%d')",
+        "last_month_end": "DATE_FORMAT(LAST_DAY(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)),'%Y%m%d')",
+        "rel": "DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL {n} DAY),'%Y%m%d')",
+    },
+    "doris": {
+        # Doris 兼容 MySQL 日期函数（CURDATE/DATE_SUB/DATE_FORMAT/LAST_DAY）
+        "today": "DATE_FORMAT(CURDATE(),'%Y%m%d')",
+        "yesterday": "DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 DAY),'%Y%m%d')",
+        "last_month_start": "DATE_FORMAT(DATE_SUB(DATE_FORMAT(CURDATE(),'%Y-%m-01'), INTERVAL 1 MONTH),'%Y%m%d')",
+        "last_month_end": "DATE_FORMAT(LAST_DAY(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)),'%Y%m%d')",
+        "rel": "DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL {n} DAY),'%Y%m%d')",
+    },
+    "hive": {
+        "today": "FROM_UNIXTIME(UNIX_TIMESTAMP(),'yyyyMMdd')",
+        "yesterday": "FROM_UNIXTIME(UNIX_TIMESTAMP() - 86400,'yyyyMMdd')",
+        "last_month_start": "DATE_FORMAT(ADD_MONTHS(TRUNC(CURRENT_DATE,'MM'), -1),'yyyyMMdd')",
+        "last_month_end": "DATE_FORMAT(LAST_DAY(ADD_MONTHS(TRUNC(CURRENT_DATE,'MM'), -1)),'yyyyMMdd')",
+        "rel": "FROM_UNIXTIME(UNIX_TIMESTAMP() - {n} * 86400,'yyyyMMdd')",
+    },
+    "sparksql": {
+        "today": "DATE_FORMAT(CURRENT_DATE,'yyyyMMdd')",
+        "yesterday": "DATE_FORMAT(DATE_SUB(CURRENT_DATE, 1),'yyyyMMdd')",
+        "last_month_start": "DATE_FORMAT(ADD_MONTHS(TRUNC(CURRENT_DATE,'MM'), -1),'yyyyMMdd')",
+        "last_month_end": "DATE_FORMAT(LAST_DAY(ADD_MONTHS(TRUNC(CURRENT_DATE,'MM'), -1)),'yyyyMMdd')",
+        "rel": "DATE_FORMAT(DATE_SUB(CURRENT_DATE, {n}),'yyyyMMdd')",
+    },
+}
+
+# 时间粒度分组表达式：{gran: 表达式模板}（{dt} 为分区列）
+GRAN_EXPRS: dict[str, dict[str, str]] = {
+    "sqlite": {
+        "day": "{dt}",
+        "week": "substr({dt},1,4) || '-W' || printf('%02d', iso_week({dt}))",
+        "month": "substr({dt},1,4) || '-' || substr({dt},5,2)",
+        "quarter": "substr({dt},1,4) || '-Q' || ((CAST(substr({dt},5,2) AS INTEGER) + 2) / 3)",
+        "year": "substr({dt},1,4)",
+    },
+    "mysql": {
+        "day": "{dt}",
+        "week": "DATE_FORMAT({dt},'%x-W%v')",
+        "month": "DATE_FORMAT({dt},'%Y-%m')",
+        "quarter": "CONCAT(SUBSTR({dt},1,4),'-Q',CEIL(CAST(SUBSTR({dt},5,2) AS UNSIGNED)/3))",
+        "year": "SUBSTR({dt},1,4)",
+    },
+    "doris": {
+        "day": "{dt}",
+        "week": "DATE_FORMAT({dt},'%x-W%v')",
+        "month": "DATE_FORMAT({dt},'%Y-%m')",
+        "quarter": "CONCAT(SUBSTR({dt},1,4),'-Q',CEIL(CAST(SUBSTR({dt},5,2) AS INT)/3))",
+        "year": "SUBSTR({dt},1,4)",
+    },
+    "hive": {
+        "day": "{dt}",
+        "week": "CONCAT(SUBSTR({dt},1,4),'-W',LPAD(WEEKOFYEAR({dt}),2,'0'))",
+        "month": "SUBSTR({dt},1,7)",
+        "quarter": "CONCAT(SUBSTR({dt},1,4),'-Q',CEIL(CAST(SUBSTR({dt},5,2) AS INT)/3))",
+        "year": "SUBSTR({dt},1,4)",
+    },
+    "sparksql": {
+        "day": "{dt}",
+        "week": "CONCAT(SUBSTR({dt},1,4),'-W',LPAD(WEEKOFYEAR({dt}),2,'0'))",
+        "month": "SUBSTR({dt},1,7)",
+        "quarter": "CONCAT(SUBSTR({dt},1,4),'-Q',CEIL(CAST(SUBSTR({dt},5,2) AS INT)/3))",
+        "year": "SUBSTR({dt},1,4)",
+    },
+}
 
 
 class TranslateError(Exception):
@@ -379,29 +466,16 @@ class Translator:
             return f"{s} ~ {e}"
         return f"{s or ''}{'~' if s and e else ''}{e or ''}"
 
-    @staticmethod
-    def _expr(x, dialect: str) -> str:
-        if dialect == "doris":
-            # ⚠️ 预留映射：未启用、未验证，仅供接入 Doris 时参考（需在真实 Doris 上回归）
-            rel = {"today": "DATE_FORMAT(CURDATE(),'%Y%m%d')",
-                   "yesterday": "DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 DAY),'%Y%m%d')",
-                   "last_month_start": "DATE_FORMAT(DATE_SUB(DATE_FORMAT(CURDATE(),'%Y-%m-01'), INTERVAL 1 MONTH),'%Y%m%d')",
-                   "last_month_end": "DATE_FORMAT(LAST_DAY(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)),'%Y%m%d')"}
-            if x in rel:
-                return rel[x]
-            m = REL_RE.match(x)
-            if m:
-                return f"DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL {m.group(1)} DAY),'%Y%m%d')"
-        else:
-            rel = {"today": "strftime('%Y%m%d','now')",
-                   "yesterday": "strftime('%Y%m%d', date('now','-1 day'))",
-                   "last_month_start": "strftime('%Y%m%d', date('now','start of month','-1 month'))",
-                   "last_month_end": "strftime('%Y%m%d', date('now','start of month','-1 day'))"}
-            if x in rel:
-                return rel[x]
-            m = REL_RE.match(x)
-            if m:
-                return f"strftime('%Y%m%d', date('now','-{m.group(1)} days'))"
+    @classmethod
+    def _expr(cls, x, dialect: str) -> str:
+        table = TIME_EXPRS.get(dialect)
+        if table is None:
+            raise TranslateError(f"不支持的目标方言: {dialect}（支持 {sorted(SUPPORTED_DIALECTS)}）")
+        if x in table:
+            return table[x]
+        m = REL_RE.match(x)
+        if m:
+            return table["rel"].format(n=m.group(1))
         if re.fullmatch(r"\d{4}-\d{2}-\d{2}", x):
             return f"'{x.replace('-', '')}'"
         if re.fullmatch(r"\d{8}", x):
@@ -409,19 +483,13 @@ class Translator:
         raise TranslateError(f"无法解析时间表达式: {x}")
 
     def _time_group_expr(self, gran: str, dialect: str = "sqlite") -> str:
+        table = GRAN_EXPRS.get(dialect)
+        if table is None:
+            raise TranslateError(f"不支持的目标方言: {dialect}（支持 {sorted(SUPPORTED_DIALECTS)}）")
         dt = f"F.{self.onto.partition_col}"
-        if dialect == "doris":
-            # ⚠️ 预留映射：未启用、未验证，仅供接入 Doris 时参考（需在真实 Doris 上回归）
-            return {"day": dt,
-                    "week": f"DATE_FORMAT({dt},'%x-W%v')",
-                    "month": f"DATE_FORMAT({dt},'%Y-%m')",
-                    "quarter": f"CONCAT(SUBSTR({dt},1,4),'-Q',CEIL(CAST(SUBSTR({dt},5,2) AS INT)/3))",
-                    "year": f"SUBSTR({dt},1,4)"}[gran]
-        return {"day": dt,
-                "week": f"substr({dt},1,4) || '-W' || printf('%02d', iso_week({dt}))",
-                "month": f"substr({dt},1,4) || '-' || substr({dt},5,2)",
-                "quarter": f"substr({dt},1,4) || '-Q' || ((CAST(substr({dt},5,2) AS INTEGER) + 2) / 3)",
-                "year": f"substr({dt},1,4)"}[gran]
+        if gran not in table:
+            raise TranslateError(f"粒度 {gran} 在方言 {dialect} 无映射")
+        return table[gran].format(dt=dt)
 
     # ── 排序/限量 ───────────────────────────────────────────
     def _order_limit(self, mql: dict, metric_names: set[str]) -> str:

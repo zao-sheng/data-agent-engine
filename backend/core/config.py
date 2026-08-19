@@ -49,6 +49,8 @@ class Config:
         self.audit_backup_count: int = int(os.environ.get("DATA_AGENT_AUDIT_BACKUPS", "7"))
         # 默认方言（P1-5）：sqlite 已实现；mysql/doris/hive/sparksql 走远程驱动
         self.dialect_default: str = os.environ.get("DATA_AGENT_DIALECT", "sqlite")
+        # 远程连接超时（秒）
+        self.remote_timeout_s: int = int(os.environ.get("DATA_AGENT_REMOTE_TIMEOUT", "15"))
         # 远程数仓连接串：DATA_AGENT_DSN_MYSQL / DATA_AGENT_DSN_DORIS / ...
         # 格式：scheme://user:pass@host:port/db（scheme = mysql|doris|hive|sparksql）
         self.remote_dsn: dict[str, str] = {

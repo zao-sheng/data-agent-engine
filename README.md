@@ -148,10 +148,15 @@ dsh-side/          setup_dsh.py + 「数据助理」预设模板 + 8 个 skills
 > 内置 order 交易主题（下单/支付/消费/退款 + 产品/门店/区域/用户）是「可运行示例」，替换后即为你的领域。
 
 ### 换真实数仓
-1. 配置连接：覆盖 `core/executor.py` 的 `_execute_remote`（SQL 不变，方言在翻译引擎处理）；
-2. 生成本体骨架：`uv run --project backend python -m builder.build_ontology --sqlite <库>`；
-3. 🔴 人工补全：对象 `description`、指标 `formula`/口径/版本、relations `join_key` 核对；
-4. 填 Golden Dataset 并跑门禁：`uv run --project backend python -m eval.eval`。
+1. 配置连接：复制 `backend/.env.example` 为 `backend/.env`，填
+   `DATA_AGENT_DSN_<方言>`（mysql/doris/hive/sparksql 均内置驱动接入骨架；
+   SQL 不变，方言由翻译引擎按 dialect 生成）；
+2. 装驱动：`uv pip install --python backend/.venv/bin/python pymysql`（mysql/doris）
+   或 `pyhive thrift sasl`（hive/sparksql）；
+3. 生成本体骨架：`uv run --project backend python -m builder.build_ontology --sqlite <库>`；
+4. 🔴 人工补全：对象 `description`、指标 `formula`/口径/版本、relations `join_key` 核对；
+5. 填 Golden Dataset 并跑门禁：`uv run --project backend python -m eval.eval`；
+6. 方言翻译回归：`uv run --project backend python -m unittest tests.test_dialect_snapshots`。
 
 ### 接入 ETL 平台能力（路径 D）
 - `ddl_generate` 已实现（本地，遵守 `warehouse-standards` 命名规范）；
