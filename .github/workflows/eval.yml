@@ -10,7 +10,7 @@ jobs:
       - run: uv pip install --system -r backend/requirements.txt
       - run: uv run --project backend python -m seed.seed --out backend/seed/sample.db --seed 42
       - run: uv run --project backend python -m eval.eval
-      # 引擎单元测试（P0 安全 / P1 方言 / P2 可观测 / P4 工程化）
+      # 引擎单元测试（安全/方言/可观测/元数据/建模/路径D，58 项）
       - run: uv run --project backend python -m unittest discover -s tests
       # DSH 侧配置回归（patch 格式 / upsert 幂等）
       - run: uv run --project backend python -m unittest discover -s ../dsh-side

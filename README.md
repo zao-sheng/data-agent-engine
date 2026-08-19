@@ -63,7 +63,7 @@ git clone <repo> && cd data-agent-engine
 |------|---------|
 | 查 dwd_ord_pay_di 表里 pay_amt 大于 100 的 | 物理表/字段名被校验器拒绝，agent 修正或反问，不硬写物理名 |
 | 帮我算一下「客户满意度」 | 未注册指标，列出候选或反问，不编造 |
-| 帮我新建一个按周汇总的用户复购率指标 | 走 ETL 路径 D：查重 → 生成 DDL（遵守命名规范）→ 调度（预留提示）→ 审批 |
+| 帮我新建一个按周汇总的用户复购率指标 | 走 ETL 路径 D：需求识别清单（可编辑）→ 方案书（变更评估）→ modeling_plan 配对 DDL+ETL → 测试 → 上线 → 调度 → SLA/DQC，每阶段整体确认后执行 |
 
 > 每条提问都会经过：规划（plan-routing）→ OAG 理解 → MQL 校验 → **确认环节** → 确定性翻译 → 口径标注回答。
 
@@ -107,8 +107,8 @@ git clone <repo> && cd data-agent-engine
 | 配置外置 | 全部运行时配置走 `backend/.env`（`DATA_AGENT_*` 前缀，见 `.env.example`）：介质/方言/远程连接串/令牌 TTL/日志轮转参数 |
 | 检索索引 | `ontology_search` 走加载期构建的倒排索引（名称/别名/展示名），O(1) 精确命中 + 前缀兜底，替代全量线性扫描 |
 | 默认 t-1 | 未识别时间参数 → 默认查昨天，回答标注 |
-| ETL（路径 D） | `ddl_generate` / `etl_generate` 已实现（Spark SQL，Hive 风格）；调度 `scheduler_submit` 预留待接平台 MCP |
-| 建模流程 | 路径 D 按 modeling-workflow 规范阶段化执行（需求分析→方案→落地→测试→上线→调度→SLA/DQC），需求表/方案书为**可编辑草稿**（来源标注：需求文档/用户input/待确认，逐项确认可改）；落地阶段用 modeling_plan **配对生成 DDL+ETL**（N 表=N 对，`summary.paired` 强制校验，防 2 DDL 配 1 ETL）；每阶段先出报告 → 确认 → 才执行 |
+| ETL（路径 D） | `modeling_plan` 配对生成 DDL+ETL（Spark SQL，Hive 风格，N 表=N 对）；`ddl_generate`/`etl_generate` 单表工具；调度 `scheduler_submit` 预留待接平台 MCP |
+| 建模流程 | 路径 D 按 modeling-workflow 规范阶段化执行（需求分析→方案→落地→测试→上线→调度→SLA/DQC），需求表/方案书为**可编辑草稿**（来源标注：需求文档/用户input/待确认，逐项确认可改）；落地阶段用 modeling_plan **配对生成 DDL+ETL**（N 表=N 对，`summary.paired` 强制校验，防 2 DDL 配 1 ETL）；所有确认走**清单确认协议**（完整清单带编号 → 一次整体确认 → 用户可编辑「编号+新值」），禁止逐项弹选择题 |
 | 查询令牌 | `semantic_translate` 签发 query_token（绑定 SQL、短 TTL），`execute_sql` 必须携带校验——禁止绕过翻译引擎执行裸 SQL（行级权限/表选择/口径过滤不可被绕过） |
 | 审计日志 | 所有 MCP 工具调用落 `backend/logs/audit.jsonl`（调用方/动作/入参摘要/耗时/结果规模），轮转清理不无限增长 |
 | 运行日志 | `backend/logs/runtime.jsonl` 记录启动自检/连接/异常等运行态，jsonl + 轮转；启动自检（ontology/介质/日志目录）fail-fast，`health_check` 工具返回引擎状态 |
@@ -123,12 +123,13 @@ git clone <repo> && cd data-agent-engine
 DSH 侧（配置，零代码）                Python 侧（引擎）
 ┌──────────────────────────┐   MCP    ┌──────────────────────────────┐
 │ 数据助理 preset           │ ──────▶ │ mcp_servers/server.py        │
-│  persona + 9 个 skills    │  stdio   │  ├ ontology_search/traverse  │
+│  persona + 8 个 skills    │  stdio   │  ├ ontology_search/traverse  │
 │  dsh-mcp-client           │          │  ├ mql_validate/explain     │
 └──────────────────────────┘          │  ├ semantic_translate（翻译） │
                                       │  ├ execute_sql（只读执行）    │
-                                      │  ├ ddl_generate / etl_generate（Spark SQL）
-                                       │  └ scheduler_submit（预留）  │
+                                      │  ├ metadata_search（元数据）   │
+                                      │  ├ ddl/etl/modeling_plan（Spark SQL）
+                                      │  └ scheduler_submit（预留）  │
                                       └──────────────────────────────┘
 ```
 
@@ -140,10 +141,10 @@ backend/
 ├── core/          确定性引擎（loader / validator / translator / executor /
 │                  ddl_gen / etl_gen / query_token / confirm_token / audit /
 │                  runtime_log / startup_check / config）
-├── mcp_servers/   FastMCP 入口（12 个工具）
-├── tests/         引擎单元测试（P0 安全 / P1 方言 / P2 可观测 / P4 工程化 / 路径 D）
+├── mcp_servers/   FastMCP 入口（14 个工具）
+├── tests/         引擎单元测试（安全/方言/可观测/建模/元数据/路径D 共 58 项）
 └── eval/          Golden Dataset + 评测门禁
-dsh-side/          setup_dsh.py + 「数据助理」预设模板 + 9 个 skills
+dsh-side/          setup_dsh.py + 「数据助理」预设模板 + 8 个 skills
 ```
 
 ## 二次开发
@@ -193,9 +194,10 @@ dsh-side/          setup_dsh.py + 「数据助理」预设模板 + 9 个 skills
 
 ## 文档
 
-- [方案设计（修订版 v2.0）](DataAgent落地技术方案-修订版v2.0.md)
-- [落地指南（Python 版）](DSH实现DataAgent落地指南-Python版.md)
 - [代码解读报告（当前代码）](DataAgent代码解读报告.md)
+- [数据仓库规范（warehouse-standards skill）](dsh-side/agent-presets/data-agent/skills/warehouse-standards/SKILL.md)
+- [建模流程规范（modeling-workflow skill）](dsh-side/agent-presets/data-agent/skills/modeling-workflow/SKILL.md)
+- [环境变量配置说明](backend/.env.example)
 
 ## License
 
