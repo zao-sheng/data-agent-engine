@@ -89,10 +89,15 @@ class SupabaseStoreReadTest(unittest.TestCase):
     def test_select_filters_deleted(self, mock_client):
         mock_client.return_value.get.side_effect = _fake_get
         self.store.load()
-        # 断言请求带了 is_deleted=eq.false
+        # 业务表带 is_deleted=eq.false；config（无该列）不带，避免 42703
         calls = mock_client.return_value.get.call_args_list
-        for c in calls:
+        biz = [c for c in calls if "ontology_config" not in c.args[0]]
+        cfg = [c for c in calls if "ontology_config" in c.args[0]]
+        self.assertTrue(biz, "应有业务表请求")
+        for c in biz:
             self.assertEqual(c.kwargs["params"]["is_deleted"], "eq.false")
+        self.assertTrue(cfg, "应有 config 请求")
+        self.assertNotIn("is_deleted", cfg[0].kwargs["params"])
 
     def test_create_store_supabase_requires_creds(self):
         with self.assertRaises(ValueError):
@@ -148,6 +153,45 @@ class SupabaseWriterTest(unittest.TestCase):
         # 请求带 revision 条件
         params = mock_client.return_value.patch.call_args.kwargs["params"]
         self.assertEqual(params["revision"], "eq.5")
+
+
+class NormalizeRowsTest(unittest.TestCase):
+    """normalize_rows：键对齐 + NOT NULL 类型安全（防 PGRST102/23502/22P02）。"""
+
+    def test_aligns_keys(self):
+        from core.ontology_store import normalize_rows, SUPABASE_ROW_KEYS
+        rows = [{"name": "A", "display_name": "甲"},
+                {"name": "B"}]  # B 缺 display_name
+        out = normalize_rows(rows, SUPABASE_ROW_KEYS["ontology_objects"])
+        self.assertEqual(set(out[0].keys()), set(out[1].keys()))
+        self.assertEqual(out[1]["display_name"], "")
+
+    def test_jsonb_none_becomes_array(self):
+        from core.ontology_store import normalize_rows, SUPABASE_ROW_KEYS
+        rows = [{"name": "A"}]  # 缺 aliases
+        out = normalize_rows(rows, SUPABASE_ROW_KEYS["ontology_objects"])
+        self.assertEqual(out[0]["aliases"], "[]")
+        self.assertEqual(out[0]["properties"], "[]")
+
+    def test_bool_none_becomes_false(self):
+        from core.ontology_store import normalize_rows, SUPABASE_ROW_KEYS
+        rows = [{"name": "gmv", "formula": "SUM(x)", "owner": "Payment"}]  # 缺 default_of_family
+        out = normalize_rows(rows, SUPABASE_ROW_KEYS["ontology_functions"])
+        self.assertIs(out[0]["default_of_family"], False)
+
+    def test_yaml_rows_normalize_cleanly(self):
+        """真实 YAML 数据经过 normalize 后键一致且类型安全。"""
+        from core.ontology_store import (
+            SUPABASE_ROW_KEYS, YamlOntologyStore, normalize_rows)
+        y = YamlOntologyStore(ONTOLOGY_DIR).load()
+        objs = normalize_rows(y.objects, SUPABASE_ROW_KEYS["ontology_objects"])
+        fns = normalize_rows(y.functions, SUPABASE_ROW_KEYS["ontology_functions"])
+        # 所有行键一致
+        self.assertEqual(len({frozenset(r.keys()) for r in objs}), 1)
+        self.assertEqual(len({frozenset(r.keys()) for r in fns}), 1)
+        # 无 None（避免 NOT NULL 违反）
+        self.assertTrue(all(v is not None for r in objs for v in r.values()))
+        self.assertTrue(all(v is not None for r in fns for v in r.values()))
 
 
 if __name__ == "__main__":

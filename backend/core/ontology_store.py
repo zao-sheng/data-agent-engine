@@ -177,7 +177,7 @@ class SqliteOntologyStore:
 #   GET    {url}/rest/v1/{table}?select=*&is_deleted=eq.false
 #   POST   {url}/rest/v1/{table}              （upsert，Prefer: resolution=merge-duplicates）
 #   PATCH  {url}/rest/v1/{table}?name=eq.x    （按主键更新，带 revision 校验）
-# 认证：apikey header（anon/service_role）。
+# 认证：apikey header（publishable / secret key 均可）。
 SUPABASE_TABLES = {
     "objects": "ontology_objects",
     "functions": "ontology_functions",
@@ -185,6 +185,49 @@ SUPABASE_TABLES = {
     "glossary": "ontology_glossary",
     "config": "ontology_config",
 }
+
+# 每张表插入时的列集合（对齐 PostgREST 批量 upsert 的「所有行键一致」要求）
+SUPABASE_ROW_KEYS = {
+    "ontology_objects": ("name", "display_name", "description", "aliases",
+                         "required_filters", "properties", "source_tables",
+                         "versions", "default_version"),
+    "ontology_functions": ("name", "display_name", "description", "formula", "owner",
+                           "family", "variant_label", "default_of_family",
+                           "required_filters", "supported_dimensions",
+                           "supported_granularities", "do_not", "version"),
+    "ontology_relations": ("source", "target", "type", "join_key", "cardinality"),
+    "ontology_glossary": ("term", "canonical", "type"),
+    "ontology_config": ("key", "value"),
+}
+
+
+def normalize_rows(rows: list[dict], keys: tuple[str, ...]) -> list[dict]:
+    """把行补全为统一键集（PostgREST 批量 upsert 要求所有行键一致）。
+
+    YAML 对象/指标 dict 的行间键可能不一致（部分对象缺某些字段），
+    批量插入前必须对齐；NOT NULL 列缺省补类型安全值：
+      * JSONB 列补 []；BOOLEAN 列补 false；其余 TEXT 列补 ''
+    避免触发 23502 not-null / 22P02 类型语法错误。
+    """
+    jsonb_cols = {"aliases", "required_filters", "properties", "source_tables",
+                  "versions", "supported_dimensions", "supported_granularities"}
+    bool_cols = {"default_of_family"}
+    out = []
+    for row in rows:
+        r = {}
+        for k in keys:
+            v = row.get(k)
+            if v is None:
+                if k in jsonb_cols:
+                    r[k] = "[]"
+                elif k in bool_cols:
+                    r[k] = False
+                else:
+                    r[k] = ""
+            else:
+                r[k] = v
+        out.append(r)
+    return out
 
 
 def _supabase_client() -> Any:
@@ -222,9 +265,14 @@ class SupabaseOntologyStore:
         )
 
     def _select(self, table: str) -> list[dict]:
+        params: dict[str, str] = {"select": "*"}
+        # 只有带 is_deleted 列的业务表加软删除过滤；
+        # meta/config 是纯键值表，无该列（加了会 42703 报错）
+        if table not in ("ontology_meta", "ontology_config"):
+            params["is_deleted"] = "eq.false"
         r = _supabase_client().get(
             f"{self.url}/rest/v1/{table}",
-            params={"select": "*", "is_deleted": "eq.false"},
+            params=params,
             headers={"apikey": self.key, "Authorization": f"Bearer {self.key}",
                      "Accept-Profile": self.schema})
         r.raise_for_status()
