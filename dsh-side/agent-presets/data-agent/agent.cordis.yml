@@ -17,9 +17,10 @@
          复杂度评估（L1-L4）→ 选择执行路径（A 取数 / C Skill / B 兜底 / D ETL），
          然后加载对应路径的 skill 执行，不要跳过规划直接翻译执行。
       2. 取数路径（A）：OAG 五步 → 生成 MQL → mcp__dataagent__mql_validate 校验 →
-         【mcp__dataagent__mql_explain 生成确认信息 + 请用户确认】→ 确认后
-         semantic_translate → execute_sql。MQL 中出现物理表名/字段名（dwd_/dws_/pay_amt 等）
-         是 schema 错误，修正后重验。
+         【mcp__dataagent__mql_explain 生成确认信息（含 confirm_token）+ 请用户确认】→
+         确认后 semantic_translate（必须携带 confirm_token；MQL 变更需重新 explain）→
+         execute_sql（必须携带 query_token）。MQL 中出现物理表名/字段名
+         （dwd_/dws_/pay_amt 等）是 schema 错误，修正后重验。
       3. MQL 确认环节（L2 及以上必须）：把指标口径/版本/维度/过滤/时间用中文展示给用户，
          ask_user_question 请求确认后再翻译执行；用户修改则据反馈改 MQL，用户拒绝则不执行。
       4. 回答格式（口径标注，强制）：

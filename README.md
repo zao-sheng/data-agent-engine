@@ -102,7 +102,9 @@ git clone <repo> && cd data-agent-engine
 | 指标族（多口径） | 同族多口径（pay/order/consume GMV）三级识别：精确命中→族默认→召回确认；回答标注口径名 |
 | 业务黑话归一 | glossary 词典 + term_normalize 确定性归一（poi→门店、goods→产品）；回答回译用户用词 |
 | 表选择优化 | 预聚合表优先；维度不覆盖自动回落明细表；有行级权限自动排除无权限列的表 |
-| MQL 用户确认 | `mql_explain` 展示口径/维度/过滤/时间，确认后才翻译执行 |
+| MQL 用户确认 | `mql_explain` 展示口径/维度/过滤/时间并签发 confirm_token；`semantic_translate` **必填 confirm_token**（工具层强制，MQL 变更需重新确认），防跳过确认直接翻译 |
+| 配置外置 | 全部运行时配置走 `backend/.env`（`DATA_AGENT_*` 前缀，见 `.env.example`）：介质/方言/远程连接串/令牌 TTL/日志轮转参数 |
+| 检索索引 | `ontology_search` 走加载期构建的倒排索引（名称/别名/展示名），O(1) 精确命中 + 前缀兜底，替代全量线性扫描 |
 | 默认 t-1 | 未识别时间参数 → 默认查昨天，回答标注 |
 | ETL（路径 D） | `ddl_generate` 已实现（遵守命名规范）；调度 `scheduler_submit` 预留待接平台 MCP |
 | 查询令牌 | `semantic_translate` 签发 query_token（绑定 SQL、短 TTL），`execute_sql` 必须携带校验——禁止绕过翻译引擎执行裸 SQL（行级权限/表选择/口径过滤不可被绕过） |

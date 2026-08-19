@@ -43,6 +43,9 @@ class Config:
         # 查询令牌（P0-1）：execute_sql 必须携带 semantic_translate 签发的令牌
         self.query_token_ttl: int = int(os.environ.get("DATA_AGENT_TOKEN_TTL", "300"))
         self.query_token_max: int = int(os.environ.get("DATA_AGENT_TOKEN_MAX", "500"))
+        # 确认令牌（P4-14）：semantic_translate 必须携带 mql_explain 签发的令牌
+        self.confirm_token_ttl: int = int(os.environ.get("DATA_AGENT_CONFIRM_TOKEN_TTL", "600"))
+        self.confirm_token_max: int = int(os.environ.get("DATA_AGENT_CONFIRM_TOKEN_MAX", "200"))
         # 审计日志（P0-3）：轮转参数——单文件上限与保留份数
         self.audit_max_bytes: int = int(os.environ.get("DATA_AGENT_AUDIT_MAX_BYTES",
                                                        str(10 * 1024 * 1024)))

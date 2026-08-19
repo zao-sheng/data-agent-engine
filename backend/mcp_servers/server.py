@@ -45,6 +45,7 @@ from mcp.server.fastmcp import FastMCP  # noqa: E402
 from core import Executor, MqlValidator, Ontology, Translator  # noqa: E402
 from core.audit import audit, setup_audit_logger  # noqa: E402
 from core.config import CONFIG  # noqa: E402
+from core.confirm_token import ConfirmTokenStore  # noqa: E402
 from core.query_token import QueryTokenStore  # noqa: E402
 from core.runtime_log import log_error, log_info, log_warn, setup_runtime_logger  # noqa: E402
 from core.startup_check import run_startup_checks, startup_status  # noqa: E402
@@ -77,6 +78,10 @@ if not all(_c.ok for _c in _STARTUP_CHECKS if _c.required):
 # 查询令牌存储（P0-1）：翻译签发 → 执行校验
 _token_store = QueryTokenStore(ttl_seconds=CONFIG.query_token_ttl,
                                max_tokens=CONFIG.query_token_max)
+
+# 确认令牌存储（P4-14）：mql_explain 签发 → semantic_translate 强制携带
+_confirm_store = ConfirmTokenStore(ttl_seconds=CONFIG.confirm_token_ttl,
+                                   max_tokens=CONFIG.confirm_token_max)
 
 # 审计日志（P0-3）：jsonl + 轮转
 setup_audit_logger(CONFIG.log_dir, max_bytes=CONFIG.audit_max_bytes,
@@ -169,18 +174,7 @@ def _summarize_result(result, tool: str) -> dict:
 @_audit_tool
 def ontology_search(query: str) -> str:
     """OAG Step1/2：按名称/别名检索业务对象、指标与属性。只返回 Ontology 中已注册的内容，不得发明。"""
-    q = query.strip().lower()
-    hits = []
-    for name, o in _onto.objects.items():
-        if q in name.lower() or q in o.get("display_name", "").lower():
-            props = ", ".join(p["name"] for p in o.get("properties", []))
-            hits.append(f"[对象] {name}（{o.get('display_name')}）：{o.get('description','')}；属性: {props}")
-    for name, f in _onto.functions.items():
-        if q in name.lower() or q in f.get("display_name", "").lower():
-            hits.append(f"[指标] {name}（{f.get('display_name')}）：{f.get('description','')}；公式: {f['formula']}；版本: {f.get('version')}")
-    for p in _onto.all_properties():
-        if q in p.lower():
-            hits.append(f"[属性] {p}（归属 {_onto.owner_of(p)}）")
+    hits = _onto.search(query)
     return "\n".join(hits) if hits else f"未命中：{query}（触发模糊匹配 + 澄清，不要编造）"
 
 
@@ -217,14 +211,20 @@ def mql_validate(mql: dict) -> dict:
 
 @mcp.tool()
 @_audit_tool
-def semantic_translate(mql: dict, user: dict | None = None, dialect: str = "sqlite") -> dict:
+def semantic_translate(mql: dict, confirm_token: str,
+                       user: dict | None = None, dialect: str = "sqlite") -> dict:
     """确定性翻译引擎：MQL → 可执行 SQL。含行级权限注入（user.region_ids）、
     表选择（预聚合/明细+多表 JOIN）、required_filter、默认时间 t-1。零 LLM。
-    翻译成功返回 query_token（绑定 SQL），execute_sql 必须携带——禁止绕过
-    翻译引擎执行裸 SQL。
+
+    必须携带 mql_explain 返回的 confirm_token（绑定 MQL 指纹）——确认过的
+    查询才能翻译，防跳过用户确认。翻译成功返回 query_token（绑定 SQL），
+    execute_sql 必须携带——禁止绕过翻译引擎执行裸 SQL。
     dialect: sqlite（默认，已实现已测试）/ doris / mysql / hive / sparksql
     （远程方言仅翻译，需在 backend/.env 配置 DATA_AGENT_DSN_<方言> 并接入
     _execute_remote 后执行）。"""
+    ok, reason = _confirm_store.verify(confirm_token, mql)
+    if not ok:
+        return {"error": f"确认令牌校验失败: {reason}"}
     result = _validator.validate(mql)
     if not result["ok"]:
         return {"error": "MQL 校验失败", "validation": result}
@@ -232,6 +232,7 @@ def semantic_translate(mql: dict, user: dict | None = None, dialect: str = "sqli
     if "error" in tr:
         return tr
     tr["query_token"] = _token_store.issue(tr["sql"])
+    tr["confirmed"] = True
     return tr
 
 
@@ -251,8 +252,11 @@ def execute_sql(sql: str, query_token: str) -> dict:
 @mcp.tool()
 @_audit_tool
 def mql_explain(mql: dict) -> dict:
-    """把 MQL 转成人类可读的确认信息。用户在 semantic_translate 执行【之前】用本工具
-    把即将查询的指标口径/维度/过滤/时间展示给用户确认。"""
+    """把 MQL 转成人类可读的确认信息，并签发 confirm_token。
+
+    用户在 semantic_translate 执行【之前】必须先用本工具展示口径/维度/过滤/
+    时间并请用户确认；返回的 confirm_token 是 semantic_translate 的必填参数
+    （绑定当前 MQL 指纹，MQL 变更需重新 explain）——防止跳过确认直接翻译执行。"""
     v = _validator.validate(mql)
     if not v["ok"]:
         return {"ok": False, "validation": v}
@@ -282,7 +286,8 @@ def mql_explain(mql: dict) -> dict:
     return {"ok": True, "metrics": metrics, "dimensions": dims, "filters": filters,
             "time_range": time_desc,
             "time_defaulted": tr is None,
-            "confirm_required": True}
+            "confirm_required": True,
+            "confirm_token": _confirm_store.issue(mql)}
 
 
 @mcp.tool()

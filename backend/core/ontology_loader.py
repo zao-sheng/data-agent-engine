@@ -102,6 +102,51 @@ class Ontology:
             counters[base] = c
             self.dim_aliases[name] = base if c == 1 else f"{base}{c}"
 
+        # 搜索倒排索引（P4-15）：key=归一化 token（名称/别名/展示名小写），
+        # value=命中描述行。ontology_search 用它 O(1) 检索，避免全量线性扫描。
+        # 索引在加载时构建一次（Ontology 不可变），搜索时不再遍历 objects。
+        self.search_index: dict[str, list[str]] = {}
+        for o in raw_objects:
+            name = o["name"]
+            props = ", ".join(p["name"] for p in o.get("properties", []))
+            line = (f"[对象] {name}（{o.get('display_name')}）：{o.get('description','')}"
+                    f"；属性: {props}")
+            for key in {name, o.get("display_name", ""), *o.get("aliases", [])}:
+                if key:
+                    self._index_add(str(key).lower(), line)
+        for f in raw_functions:
+            line = (f"[指标] {f['name']}（{f.get('display_name')}）：{f.get('description','')}"
+                    f"；公式: {f['formula']}；版本: {f.get('version')}")
+            for key in {f["name"], f.get("display_name", "")}:
+                if key:
+                    self._index_add(str(key).lower(), line)
+        for p in self.property_owner:
+            self._index_add(p.lower(), f"[属性] {p}（归属 {self.owner_of(p)}）")
+
+    def _index_add(self, key: str, line: str) -> None:
+        """往倒排索引添加一条命中（同 key 去重）。"""
+        lst = self.search_index.setdefault(key, [])
+        if line not in lst:
+            lst.append(line)
+
+    def search(self, query: str) -> list[str]:
+        """倒排索引检索：精确 token 命中 + 前缀兜底，按命中数排序。"""
+        q = query.strip().lower()
+        if not q:
+            return []
+        exact = self.search_index.get(q, [])
+        prefixed = []
+        for key, lines in self.search_index.items():
+            if key != q and key.startswith(q):
+                prefixed.extend(lines)
+        # 去重保序：精确命中优先，前缀次之
+        seen, out = set(), []
+        for line in exact + prefixed:
+            if line not in seen:
+                seen.add(line)
+                out.append(line)
+        return out
+
     # ── 基础查询 ────────────────────────────────────────────
     def get_object(self, name: str) -> dict | None:
         return self.objects.get(name)
