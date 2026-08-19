@@ -33,7 +33,7 @@ data-agent-engine/  (41 files)
 │ 智能层（LLM 只做理解）—— DSH 侧                                  │
 │   persona（8 条硬性规则）                                        │
 │   8 个 skills：plan-routing / oag-retrieval / mql-authoring /    │
-│                path-a / path-b / path-c / path-d / warehouse-standards │
+│                query-metric / explore-fallback / run-packaged-skill / modeling-etl / warehouse-standards │
 └───────────────┬─────────────────────────────────────────────────┘
                 │ MCP（stdio，dsh-mcp-client）
 ┌───────────────▼─────────────────────────────────────────────────┐
@@ -223,10 +223,10 @@ translate()            入口：捕获 TranslateError/KeyError → {"error"}
 | plan-routing | §4.3 | 意图分类(L1-L4) + 路径选择(A/C/B/D) |
 | oag-retrieval | §6.2 | OAG 五步 + Step 0 术语归一 + 回译 |
 | mql-authoring | §5 | MQL 规范 + 指标族三级识别 + 多指标 |
-| path-a-query | §4.2 | 路径 A 全流程（含确认闸门） |
-| path-c-skill | §10 | Skill 直执行 |
-| path-b-fallback | §3.2 | 探索性长尾兜底 |
-| path-d-etl | §4.3 | ETL（DDL/调度/注册/审批） |
+| query-metric | §4.2 | 路径 A 全流程（含确认闸门） |
+| run-packaged-skill | §10 | Skill 直执行 |
+| explore-fallback | §3.2 | 探索性长尾兜底 |
+| modeling-etl | §4.3 | ETL（DDL/调度/注册/审批） |
 | warehouse-standards | 治理 | 分层/主题/命名规范（地址可替换） |
 
 ### 5.3 setup_dsh.py / install.sh
@@ -342,7 +342,7 @@ MQL：{"metrics":[{"name":"gmv"},{"name":"refund_amount"}],
 
 用户：**「帮我新建一个按周汇总的用户复购率指标」**
 ```
-plan → 意图=ETL → L4 → 路径 D（path-d-etl skill）
+plan → 意图=ETL → L4 → 路径 D（modeling-etl skill）
 ① ontology_search 查重（未注册）
 ② 拆子任务：设计表结构 / ETL 代码 / 调度 / 注册 Ontology / 审批
 ③ ddl_generate(obj, DWS) → 表名按规范 = dws_xxx_1d + dt 分区 + is_valid + COMMENT

@@ -1,10 +1,14 @@
-"""P4 工程化测试：确认令牌（mql_explain → semantic_translate 强制）+ 搜索倒排索引。
+"""安全与治理测试：查询令牌 / 确认令牌 / 审计日志 / 搜索索引（P0+P4 合并）。
 
-运行：backend/.venv/bin/python -m unittest tests.test_p4_engineering
+运行：backend/.venv/bin/python -m unittest tests.test_security
 """
 from __future__ import annotations
 
+import json
+import logging
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -13,6 +17,7 @@ sys.path.insert(0, str(BACKEND))
 
 from core import Ontology  # noqa: E402
 from core.confirm_token import ConfirmTokenStore  # noqa: E402
+from core.query_token import QueryTokenStore  # noqa: E402
 
 
 class ConfirmTokenTest(unittest.TestCase):
@@ -93,6 +98,10 @@ class SearchIndexTest(unittest.TestCase):
     def test_index_has_no_duplicates(self):
         hits = self.onto.search("gmv")
         self.assertEqual(len(hits), len(set(hits)))
+
+
+if __name__ == "__main__":
+    unittest.main()
 
 
 if __name__ == "__main__":

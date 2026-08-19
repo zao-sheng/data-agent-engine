@@ -1,5 +1,5 @@
 ---
-name: modeling-process
+name: modeling-workflow
 description: 建模全流程规范（路径 D）。从需求文档提取建模需求 → 出方案书 → 确认后 DDL/ETL/注册 → 测试 → 上线 → 调度 → SLA/DQC。每阶段先产出逻辑报告，与用户澄清确认后才真实执行。
 ---
 

@@ -1,5 +1,5 @@
 ---
-name: path-b-fallback
+name: explore-fallback
 description: 兜底路径 B——Ontology 无法覆盖的探索性长尾查询。启用前先确认已走完路径 A（翻译失败且根因不是可修复的映射缺失）。
 ---
 

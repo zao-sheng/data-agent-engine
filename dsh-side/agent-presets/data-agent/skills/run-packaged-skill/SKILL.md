@@ -1,5 +1,5 @@
 ---
-name: path-c-skill
+name: run-packaged-skill
 description: 路径 C——命中已封装 Skill 的高频模式，跳过 LLM 生成 MQL，直接结构化参数执行。
 ---
 
@@ -17,8 +17,8 @@ description: 路径 C——命中已封装 Skill 的高频模式，跳过 LLM �
 1. 把用户需求映射为 Skill 的**结构化输入参数**（不是自然语言，不是自由 SQL）；
 2. 按该 Skill 的 schema 校验参数；
 3. 执行（MQL 型走语义层翻译；操作型走平台工具）；
-4. 结果按口径标注回答（同 path-a-query 第 6 步）。
+4. 结果按口径标注回答（同 query-metric 第 6 步）。
 
 ## 规则
 - 参数固定、输入输出明确的场景优先走本路径（0 幻觉、口径一致）；
-- Skill 执行失败 → 降级到 path-a-query 并标记「需人工确认」。
+- Skill 执行失败 → 降级到 query-metric 并标记「需人工确认」。

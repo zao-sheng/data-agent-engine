@@ -1,5 +1,5 @@
 ---
-name: path-a-query
+name: query-metric
 description: 路径 A——已注册指标的取数查询。OAG 理解 → MQL → 用户确认 → 确定性翻译 → 执行 → 口径标注回答。
 ---
 

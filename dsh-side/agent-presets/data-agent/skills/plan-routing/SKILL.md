@@ -26,12 +26,12 @@ description: 意图识别后的计划与路径选择（Plan Agent）。任何用
 ## Step 3 · 选择执行路径（决策规则）
 ```
 有匹配 Skill？            → C（load 对应 skill 执行）
-指标已注册 + 映射完整？    → A（load path-a-query skill）
-需新建表/管道/指标？      → D（load path-d-etl skill）
-Ontology 无对应物（探索） → B（load path-b-fallback skill）
+指标已注册 + 映射完整？    → A（load query-metric skill）
+需新建表/管道/指标？      → D（load modeling-etl skill）
+Ontology 无对应物（探索） → B（load explore-fallback skill）
 ```
 - 复杂度 L1 → 执行后**结果直出**（仍标注口径）；
-- L2 及以上 → MQL 生成后**必须先经用户确认**再翻译执行（见 path-a-query）；
+- L2 及以上 → MQL 生成后**必须先经用户确认**再翻译执行（见 query-metric）；
 - L3/L4 → 拆子任务、走审批（`ask_user_question`，长链路走 task-board 异步审批）。
 
 ## Step 4 · 输出执行计划

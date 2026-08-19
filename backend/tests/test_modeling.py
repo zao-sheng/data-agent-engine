@@ -1,6 +1,6 @@
 """路径 D 测试：Spark SQL DDL 生成 + ETL 脚本生成 + 建模流程模板完整性。
 
-运行：backend/.venv/bin/python -m unittest tests.test_path_d
+运行：backend/.venv/bin/python -m unittest tests.test_modeling
 """
 from __future__ import annotations
 
@@ -106,13 +106,13 @@ class EtlGenTest(unittest.TestCase):
 
 
 class ModelingTemplateTest(unittest.TestCase):
-    """modeling-process skill 模板完整性检查（关键章节存在性）。"""
+    """modeling-workflow skill 模板完整性检查（关键章节存在性）。"""
 
     SKILL = BACKEND.parent / "dsh-side" / "agent-presets" / "data-agent" / "skills" \
-        / "modeling-process" / "SKILL.md"
+        / "modeling-workflow" / "SKILL.md"
 
     def test_skill_exists_and_has_phases(self):
-        self.assertTrue(self.SKILL.exists(), "modeling-process SKILL.md 缺失")
+        self.assertTrue(self.SKILL.exists(), "modeling-workflow SKILL.md 缺失")
         text = self.SKILL.read_text(encoding="utf-8")
         for phase in ["阶段 0", "阶段 1", "阶段 2", "阶段 3", "阶段 4",
                       "阶段 5", "阶段 6", "阶段 7"]:
