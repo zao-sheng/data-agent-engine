@@ -1,6 +1,6 @@
 # Data Agent 引擎 · 代码解读报告 v3
 
-> 基准：commit `ac83dc7`（59 个文件，24 次提交）· 评测门禁 29/29（100%，阈值 ≥90%）· 引擎单测 77 项全部通过
+> 基准：commit `ac83dc7`（59 个文件，24 次提交）· 评测门禁 29/29（100%，阈值 ≥90%）· 引擎单测 95 项全部通过
 > 目的：基于**当前代码**逐层解读技术架构、各层作用、安全模型、端到端执行过程与关键技术细节，供整体核对。
 
 ---
@@ -10,13 +10,13 @@
 ```
 data-agent-engine/  (59 files, 24 commits)
 ├── backend/                        # Python 引擎（100% Python，零 JS）
-│   ├── core/        15 模块 ≈2200 行（含 intent.py 意图识别，行数见 §3 各小节标题）
+│   ├── core/        16 模块 ≈2400 行（含 intent.py 意图识别，行数见 §3 各小节标题）
 │   ├── mcp_servers/  server.py     # FastMCP，14 个工具
 │   ├── ontology/     config · objects · functions · relations · glossary（5 YAML）
 │   ├── seed/         schema.sql（15 表）· seed.py（固定种子生成器）
 │   ├── builder/      build_ontology.py（表结构→本体骨架）
 │   ├── eval/         golden_dataset.jsonl（29 条：21 翻译执行 + 8 意图分类）· eval.py（门禁）
-│   └── tests/        7 个文件 77 项测试（详见 §7）
+│   └── tests/        8 个文件 95 项测试（详见 §7）
 ├── dsh-side/         setup_dsh.py · test_setup_dsh.py
 │   └── agent-presets/data-agent/   preset + persona + 8 skills
 ├── install.sh · README.md · LICENSE(MIT) · backend/.env.example
@@ -40,7 +40,7 @@ data-agent-engine/  (59 files, 24 commits)
 ┌──────────────▼────────────────────────────────────────────────┐
 │ 确定性层（零 LLM）—— Python 引擎（14 模块 ≈2000 行，详见 §3）    │
 │   server.py（14 工具·审计包装·双令牌·启动自检）                   │
-│   ontology_loader · mql_validator · translator(5 方言) ·       │
+│   ontology_store(存储抽象) · ontology_loader · mql_validator · │
 │   executor · metadata · ddl/etl/modeling_plan · token ×2 ·     │
 │   audit · runtime_log · startup_check · config                 │
 └──────────────┬────────────────────────────────────────────────┘
@@ -123,7 +123,7 @@ data-agent-engine/  (59 files, 24 commits)
 
 ---
 
-## 3. 确定性层：core 引擎（15 模块 ≈2200 行）
+## 3. 确定性层：core 引擎（16 模块 ≈2400 行）
 
 ### 3.1 `ontology_loader.py`（234 行）—— 索引工厂
 
@@ -197,6 +197,15 @@ translate()            入口：捕获 TranslateError/KeyError → {"error"}
 
 ### 3.9 `intent.py`（208 行）—— 意图识别（确定性预分类）
 plan-routing Step1 的结构化信号：实体识别（Ontology 指标/对象/黑话归一）+ 词表信号（取数/元数据结构词/建模动词/存量修改动词）→ 按序判定四类意图（取数 A / 元数据 / 建模 D / 存量操作）→ 输出 `{intent, confidence, path, evidence[], mixed[], metrics_missing}`。零 LLM、可单测、可入 eval 门禁；LLM 基于证据裁决，unclear/low 为预分类未覆盖（非错误），由 LLM 结合归一化文本与会话上下文兜底裁决，确实无法确定才向用户澄清（并给出倾向判断）。
+
+### 3.10 `ontology_store.py`（≈260 行）—— 本体存储抽象（YAML / SQLite / Supabase）
+把「本体数据从哪来」与「Ontology 索引构建」解耦——换存储只实现一个新 Store，Ontology 与全部调用方零改动：
+- **接口**：`OntologyStore.load() -> OntologyData`（原始 YAML 结构）；`OntologyData`（objects/functions/relations/glossary/config 五段）
+- **YamlOntologyStore**（默认）：读 `backend/ontology/*.yaml`，clone 即跑、零依赖
+- **SqliteOntologyStore**：读编译产物（`ontology_compile` YAML→SQLite，5 表 + meta 记录 schema_version/compiled_at/source_commit），发布时预构建、运行只读
+- **SupabaseOntologyStore / SupabaseOntologyWriter**（阶段 2，多人编辑真源）：走 PostgREST HTTP（轻依赖）；读 = 全量拉取还原 YAML 形状；写 = upsert（Prefer merge-duplicates）+ revision 乐观锁（`update_object_if_revision` 冲突返回 False）；建表脚本 `backend/supabase/schema.sql`；`ontology_export` 导出 YAML 评审副本
+- **create_store 工厂**：`yaml`（默认）/ `sqlite` / `supabase`，按 `DATA_AGENT_ONTOLOGY_STORE` 切换
+- 一致性保障：YAML↔SQLite↔Supabase 三种 store 构建的 Ontology 行为等价（单测覆盖数据一致性 + 索引行为一致）
 
 ---
 
@@ -321,7 +330,7 @@ server 启动：`setup_runtime_logger` → 构建 Ontology/Validator/Translator/
 - **seed**：15 表（DWD×4/DWS×4/ADS×3/DIM×4），统一 `dt` 分区，字段跨层冗余；**DWS/ADS 由 DWD 用 SQL 聚合生成**（三层口径一致，评测可交叉验证）；固定种子 42 可复现；10% 无效单让过滤有意义；近 90 天数据。
 - **builder**：PRAGMA 读表结构 → 推断对象/映射/关系候选/粒度 → YAML 骨架（人工补 description/指标 formula/join_key 核对）；换主题时辅助生成本体。
 - **eval**：29 条金标准——21 条翻译执行（基础取数 / 多指标同域+跨域 / 指标族变体 / 行级权限 / 负例，断言：校验/表选择/可执行/行数/结果列/多表合并）+ **8 条意图分类**（expect_intent/mixed/metrics_missing，plan 层门禁）；通过率 ≥90% 门禁（当前 29/29 100%）；GitHub Actions CI（seed 重建 → eval → 引擎单测 → DSH 侧回归）。
-- **tests**：7 个文件 77 项全部通过（test_security 10 / test_dialects 5 / test_observability 6 / test_metadata 11 / test_modeling 13 / test_modeling_plan 13 / **test_intent 19**）。
+- **tests**：8 个文件 95 项全部通过（test_security 10 / test_dialects 5 / test_observability 6 / test_metadata 11 / test_modeling 13 / test_modeling_plan 13 / test_intent 19 / **test_ontology_store 11 / test_supabase_store 7**）。
 
 ---
 

@@ -113,7 +113,7 @@ git clone <repo> && cd data-agent-engine
 | 审计日志 | 所有 MCP 工具调用落 `backend/logs/audit.jsonl`（调用方/动作/入参摘要/耗时/结果规模），轮转清理不无限增长 |
 | 运行日志 | `backend/logs/runtime.jsonl` 记录启动自检/连接/异常等运行态，jsonl + 轮转；启动自检（ontology/介质/日志目录）fail-fast，`health_check` 工具返回引擎状态 |
 | 安全边界 | MQL 物理渗入检测（精确物理名集合）；只读执行器（禁写、行数上限）；查询令牌强制翻译→执行绑定 |
-| 本体存储 | 读取层抽象（YAML 默认 / SQLite 编译产物可选 / Supabase 预留）：`ontology_store` 接口，换存储只动读取层；`ontology_compile` 把 YAML 编译进 SQLite（发布产物），`DATA_AGENT_ONTOLOGY_STORE=yaml|sqlite` 切换 |
+| 本体存储 | 读取层抽象（YAML 默认 / SQLite 编译产物 / Supabase 真源已实现）：`ontology_store` 接口，换存储只动读取层；`ontology_compile`（YAML→SQLite）、`ontology_export`（Supabase→YAML 评审副本）、`SupabaseOntologyWriter`（多人编辑+乐观锁）；建表脚本 `backend/supabase/schema.sql` |
 | 主题可替换 | 引擎零主题耦合：时间维度名/分区列名由 `ontology/config.yaml` 配置 |
 | 评测门禁 | Golden Dataset 回归，通过率 ≥ 90% 才放行（CI 已配置） |
 | 方言状态 | 查询执行：SQLite 已实现已测试（样例库）；MySQL/Doris/Hive/SparkSQL 为远程方言（翻译已映射，`dialect_verified` 由快照测试覆盖，执行需在 `backend/.env` 配 `DATA_AGENT_DSN_*` 接入驱动）。**DDL/ETL 演示统一 Spark SQL（Hive 风格）** |
@@ -153,7 +153,9 @@ dsh-side/          setup_dsh.py + 「数据助理」预设模板 + 8 个 skills
 ### 换主题域（order 只是示例）
 引擎零主题耦合，换主题 = 替换 `backend/ontology/` 四份文件，代码不动：
 1. `config.yaml`：改 `time_dimension`（时间维度属性名）与 `partition_column`（分区列名）；
-   （可选）本体存储：`DATA_AGENT_ONTOLOGY_STORE=yaml|sqlite`，sqlite 需先 `ontology_compile` 编译产物
+   （可选）本体存储：`DATA_AGENT_ONTOLOGY_STORE=yaml|sqlite|supabase`——sqlite 需先
+   `ontology_compile` 编译产物；supabase 需先执行 `backend/supabase/schema.sql` 建表并配置
+   `DATA_AGENT_SUPABASE_URL/KEY`，多人编辑直写 DB，`ontology_export` 导出 YAML 评审副本
 2. `objects.yaml` / `functions.yaml` / `relations.yaml`：填新主题的对象/指标/关系；
 3. 替换样例数据：新写 `seed/`（或用 `builder/build_ontology.py` 从真实库生成骨架后人工补全）；
 4. 跑评测门禁。

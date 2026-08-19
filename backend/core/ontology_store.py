@@ -172,10 +172,152 @@ class SqliteOntologyStore:
                             relations=relations, glossary=glossary, config=config)
 
 
+# ── Supabase 存储（阶段 2：多人编辑真源）────────────────────────
+# 走 PostgREST HTTP API（Supabase 标准 REST 端点，零额外重依赖）：
+#   GET    {url}/rest/v1/{table}?select=*&is_deleted=eq.false
+#   POST   {url}/rest/v1/{table}              （upsert，Prefer: resolution=merge-duplicates）
+#   PATCH  {url}/rest/v1/{table}?name=eq.x    （按主键更新，带 revision 校验）
+# 认证：apikey header（anon/service_role）。
+SUPABASE_TABLES = {
+    "objects": "ontology_objects",
+    "functions": "ontology_functions",
+    "relations": "ontology_relations",
+    "glossary": "ontology_glossary",
+    "config": "ontology_config",
+}
+
+
+def _supabase_client() -> Any:
+    """按需 import requests（避免强制依赖）。"""
+    try:
+        import requests  # noqa: F401
+        return requests
+    except ImportError:
+        raise ImportError("缺少 requests 依赖：uv pip install --python backend/.venv/bin/python requests")
+
+
+class SupabaseOntologyStore:
+    """从 Supabase 读取本体（真源）。需 url/key（见 backend/.env）。"""
+
+    def __init__(self, url: str, key: str, schema: str = "public"):
+        self.url = url.rstrip("/")
+        self.key = key
+        self.schema = schema
+
+    # ── 读接口 ──────────────────────────────────────────────
+    def load(self) -> OntologyData:
+        rows = {
+            "objects": self._select("ontology_objects"),
+            "functions": self._select("ontology_functions"),
+            "relations": self._select("ontology_relations"),
+            "glossary": self._select("ontology_glossary"),
+            "config": self._select("ontology_config"),
+        }
+        return OntologyData(
+            objects=[self._obj_to_yaml(r) for r in rows["objects"]],
+            functions=[self._fn_to_yaml(r) for r in rows["functions"]],
+            relations=[self._rel_to_yaml(r) for r in rows["relations"]],
+            glossary=[self._gloss_to_yaml(r) for r in rows["glossary"]],
+            config={r["key"]: json.loads(r["value"]) for r in rows["config"]},
+        )
+
+    def _select(self, table: str) -> list[dict]:
+        r = _supabase_client().get(
+            f"{self.url}/rest/v1/{table}",
+            params={"select": "*", "is_deleted": "eq.false"},
+            headers={"apikey": self.key, "Authorization": f"Bearer {self.key}",
+                     "Accept-Profile": self.schema})
+        r.raise_for_status()
+        return r.json()
+
+    # ── DB 行 → YAML 形状（与 YAML 文件结构一一对应）─────────
+    @staticmethod
+    def _obj_to_yaml(row: dict) -> dict:
+        return {k: row[k] for k in
+                ("name", "display_name", "description", "aliases",
+                 "required_filters", "properties", "source_tables",
+                 "versions", "default_version")}
+
+    @staticmethod
+    def _fn_to_yaml(row: dict) -> dict:
+        return {k: row[k] for k in
+                ("name", "display_name", "description", "formula", "owner",
+                 "family", "variant_label", "default_of_family",
+                 "required_filters", "supported_dimensions",
+                 "supported_granularities", "do_not", "version")}
+
+    @staticmethod
+    def _rel_to_yaml(row: dict) -> dict:
+        return {k: row[k] for k in ("source", "target", "type", "join_key", "cardinality")}
+
+    @staticmethod
+    def _gloss_to_yaml(row: dict) -> dict:
+        return {k: row[k] for k in ("term", "canonical", "type")}
+
+
+class SupabaseOntologyWriter:
+    """本体写入（多人编辑/建模流程落地）。revision 乐观锁防冲突。"""
+
+    def __init__(self, url: str, key: str, schema: str = "public"):
+        self.url = url.rstrip("/")
+        self.key = key
+        self.schema = schema
+
+    def _headers(self) -> dict:
+        return {"apikey": self.key, "Authorization": f"Bearer {self.key}",
+                "Content-Profile": self.schema, "Accept-Profile": self.schema}
+
+    def _upsert_row(self, table: str, row: dict, user: str = "") -> None:
+        """upsert 单行（按唯一键合并），更新 revision+updated_by+updated_at。"""
+        payload = dict(row)
+        payload["revision"] = payload.get("revision", 1) + 1
+        payload["updated_by"] = user
+        r = _supabase_client().post(
+            f"{self.url}/rest/v1/{table}",
+            json=[payload],
+            headers={**self._headers(),
+                     "Prefer": "resolution=merge-duplicates,return=minimal"})
+        r.raise_for_status()
+
+    def upsert_object(self, obj: dict, user: str = "") -> None:
+        self._upsert_row("ontology_objects", obj, user)
+
+    def upsert_function(self, fn: dict, user: str = "") -> None:
+        self._upsert_row("ontology_functions", fn, user)
+
+    def upsert_relation(self, rel: dict, user: str = "") -> None:
+        self._upsert_row("ontology_relations", rel, user)
+
+    def upsert_glossary(self, term: dict, user: str = "") -> None:
+        self._upsert_row("ontology_glossary", term, user)
+
+    def upsert_config(self, key: str, value, user: str = "") -> None:
+        self._upsert_row("ontology_config",
+                         {"key": key, "value": json.dumps(value, ensure_ascii=False)}, user)
+
+    # ── 乐观锁冲突检测（可选：PATCH 带 revision 条件）─────────
+    def update_object_if_revision(self, name: str, obj: dict, expected_revision: int,
+                                  user: str = "") -> bool:
+        """按 name + revision 更新；返回 False 表示冲突（他人已改）。"""
+        payload = dict(obj)
+        payload["revision"] = expected_revision + 1
+        payload["updated_by"] = user
+        r = _supabase_client().patch(
+            f"{self.url}/rest/v1/ontology_objects",
+            params={"name": f"eq.{name}", "revision": f"eq.{expected_revision}",
+                    "is_deleted": "eq.false"},
+            json=payload, headers=self._headers())
+        r.raise_for_status()
+        # return=minimal 时 204 表示命中 0 行（冲突）；200 带 body 表示成功
+        return r.status_code == 200 and bool(r.json())
+
+
 # ── 工厂 ─────────────────────────────────────────────────────
 def create_store(kind: str, base: Path | str | None = None,
-                 db: Path | str | None = None) -> OntologyStore:
-    """按 kind 创建 store：yaml（默认）/ sqlite / supabase（预留）。"""
+                 db: Path | str | None = None,
+                 url: str | None = None, key: str | None = None,
+                 schema: str = "public") -> OntologyStore:
+    """按 kind 创建 store：yaml（默认）/ sqlite / supabase。"""
     kind = (kind or "yaml").lower()
     if kind == "yaml":
         if base is None:
@@ -185,4 +327,8 @@ def create_store(kind: str, base: Path | str | None = None,
         if db is None:
             raise ValueError("sqlite store 需要 db（编译产物路径）")
         return SqliteOntologyStore(db)
+    if kind == "supabase":
+        if not url or not key:
+            raise ValueError("supabase store 需要 url 与 key（DATA_AGENT_SUPABASE_URL/KEY）")
+        return SupabaseOntologyStore(url, key, schema)
     raise ValueError(f"不支持的 ontology store: {kind}（支持 yaml / sqlite / supabase）")

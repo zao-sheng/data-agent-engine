@@ -64,10 +64,14 @@ setup_runtime_logger(CONFIG.log_dir, level=CONFIG.log_level,
                      max_bytes=CONFIG.audit_max_bytes,
                      backup_count=CONFIG.audit_backup_count)
 
-# 本体存储（1A/1B）：默认 YAML（Git 评审源）；opt-in SQLite 编译产物（DATA_AGENT_ONTOLOGY_STORE=sqlite）
+# 本体存储（1A/1B/2）：默认 YAML（Git 评审源）；opt-in SQLite 编译产物
+# （DATA_AGENT_ONTOLOGY_STORE=sqlite）或 Supabase 真源（=supabase，多人编辑）
 _onto = Ontology(store=create_store(CONFIG.ontology_store,
                                     base=CONFIG.ontology_dir,
-                                    db=CONFIG.ontology_db))
+                                    db=CONFIG.ontology_db,
+                                    url=CONFIG.supabase_url,
+                                    key=CONFIG.supabase_key,
+                                    schema=CONFIG.supabase_schema))
 _validator = MqlValidator(_onto)
 _translator = Translator(_onto)
 _executor = Executor(str(DB))
