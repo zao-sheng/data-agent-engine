@@ -13,7 +13,14 @@ jobs:
       - run: uv run --project backend python -m ontology_compile --yaml backend/ontology --out /tmp/ontology.db --commit
       - run: DATA_AGENT_ONTOLOGY_STORE=sqlite DATA_AGENT_ONTOLOGY_DB=/tmp/ontology.db uv run --project backend python -m eval.eval
       - run: uv run --project backend python -m eval.eval
-      # 引擎单元测试（安全/方言/可观测/元数据/建模/路径D/本体存储，88 项）
+      # 引擎单元测试（安全/方言/可观测/元数据/建模/路径D/本体存储/同步）
       - run: uv run --project backend python -m unittest discover -s tests
       # DSH 侧配置回归（patch 格式 / upsert 幂等）
       - run: uv run --project backend python -m unittest discover -s ../dsh-side
+      # 本体同步检查（多人编辑闭环）：配置 Supabase Secrets 后验证 YAML↔DB 一致
+      - name: Ontology sync check (optional)
+        if: ${{ secrets.SUPABASE_URL != '' }}
+        env:
+          DATA_AGENT_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          DATA_AGENT_SUPABASE_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: uv run --project backend python -m ontology_sync_check --yaml backend/ontology

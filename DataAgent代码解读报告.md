@@ -1,6 +1,6 @@
 # Data Agent 引擎 · 代码解读报告 v3
 
-> 基准：commit `ac83dc7`（59 个文件，24 次提交）· 评测门禁 29/29（100%，阈值 ≥90%）· 引擎单测 110 项全部通过
+> 基准：commit `ac83dc7`（59 个文件，24 次提交）· 评测门禁 29/29（100%，阈值 ≥90%）· 引擎单测 114 项全部通过
 > 目的：基于**当前代码**逐层解读技术架构、各层作用、安全模型、端到端执行过程与关键技术细节，供整体核对。
 
 ---
@@ -10,13 +10,13 @@
 ```
 data-agent-engine/  (59 files, 24 commits)
 ├── backend/                        # Python 引擎（100% Python，零 JS）
-│   ├── core/        17 模块 ≈2600 行（含 intent.py 意图识别，行数见 §3 各小节标题）
-│   ├── mcp_servers/  server.py     # FastMCP，16 个工具
+│   ├── core/        17 模块 ≈2700 行（含 intent.py 意图识别，行数见 §3 各小节标题）
+│   ├── mcp_servers/  server.py     # FastMCP，18 个工具
 │   ├── ontology/     config · objects · functions · relations · glossary（5 YAML）
 │   ├── seed/         schema.sql（15 表）· seed.py（固定种子生成器）
 │   ├── builder/      build_ontology.py（表结构→本体骨架）
 │   ├── eval/         golden_dataset.jsonl（29 条：21 翻译执行 + 8 意图分类）· eval.py（门禁）
-│   └── tests/        9 个文件 110 项测试（详见 §7）
+│   └── tests/        10 个文件 114 项测试（详见 §7）
 ├── dsh-side/         setup_dsh.py · test_setup_dsh.py
 │   └── agent-presets/data-agent/   preset + persona + 8 skills
 ├── install.sh · README.md · LICENSE(MIT) · backend/.env.example
@@ -123,7 +123,7 @@ data-agent-engine/  (59 files, 24 commits)
 
 ---
 
-## 3. 确定性层：core 引擎（17 模块 ≈2600 行）
+## 3. 确定性层：core 引擎（17 模块 ≈2700 行）
 
 ### 3.1 `ontology_loader.py`（234 行）—— 索引工厂
 
@@ -209,7 +209,7 @@ plan-routing Step1 的结构化信号：实体识别（Ontology 指标/对象/�
 
 ---
 
-## 4. 工具面：`mcp_servers/server.py`（16 个工具）
+## 4. 工具面：`mcp_servers/server.py`（18 个工具）
 
 server 启动：`setup_runtime_logger` → 构建 Ontology/Validator/Translator/Executor/MetadataService → `run_startup_checks`（fail-fast）→ 初始化双令牌存储 → `setup_audit_logger` → FastMCP("data-agent")。所有工具经 `@_audit_tool` 包装（保留签名供 schema 生成；记录耗时/成败/入参摘要/结果规模，审计失败不影响主流程）。
 
@@ -229,7 +229,8 @@ server 启动：`setup_runtime_logger` → 构建 Ontology/Validator/Translator/
 | ddl_generate | 路径 D | 对象+层→Spark SQL DDL | 遵守分层命名规范；人工 Review+审批 |
 | etl_generate | 路径 D | 对象+层+指标/维度→Spark SQL ETL | INSERT OVERWRITE 聚合；人工 Review+审批 |
 | modeling_plan | 路径 D | 变更清单→配对 DDL+ETL | summary.paired 强制校验；返回 editable 字段 |
-| ontology_register | 路径 D | kind+entry→写本体存储 | 双通道（yaml 文件 / supabase 真源，revision 乐观锁）；用户确认后调用 |
+| ontology_register | 路径 D | kind+entry→写本体存储 | 双通道（yaml / supabase，乐观锁）；注册后自动重载本体 |
+| ontology_reload | 运维 | 无参→重读本体 | 运行时刷新（多人编辑后当前会话读到最新） |
 | scheduler_submit | 路径 D | task_spec→预留提示 | **预留占位**（待接平台 mcp-scheduler） |
 
 方言参数：`dialect: sqlite（默认，已实现已测试）/ mysql / doris / hive / sparksql（远程方言仅翻译，需在 backend/.env 配置 DATA_AGENT_DSN_<方言> 并接入 _execute_remote 后执行）`。
@@ -331,7 +332,7 @@ server 启动：`setup_runtime_logger` → 构建 Ontology/Validator/Translator/
 - **seed**：15 表（DWD×4/DWS×4/ADS×3/DIM×4），统一 `dt` 分区，字段跨层冗余；**DWS/ADS 由 DWD 用 SQL 聚合生成**（三层口径一致，评测可交叉验证）；固定种子 42 可复现；10% 无效单让过滤有意义；近 90 天数据。
 - **builder**：PRAGMA 读表结构 → 推断对象/映射/关系候选/粒度 → YAML 骨架（人工补 description/指标 formula/join_key 核对）；换主题时辅助生成本体。
 - **eval**：29 条金标准——21 条翻译执行（基础取数 / 多指标同域+跨域 / 指标族变体 / 行级权限 / 负例，断言：校验/表选择/可执行/行数/结果列/多表合并）+ **8 条意图分类**（expect_intent/mixed/metrics_missing，plan 层门禁）；通过率 ≥90% 门禁（当前 29/29 100%）；GitHub Actions CI（seed 重建 → eval → 引擎单测 → DSH 侧回归）。
-- **tests**：9 个文件 110 项全部通过（test_security 10 / test_dialects 5 / test_observability 6 / test_metadata 11 / test_modeling 13 / test_modeling_plan 13 / test_intent 19 / test_ontology_store 11 / test_supabase_store 7 / **test_ontology_writer 11**）。
+- **tests**：10 个文件 114 项全部通过（test_security 10 / test_dialects 5 / test_observability 6 / test_metadata 11 / test_modeling 13 / test_modeling_plan 13 / test_intent 19 / test_ontology_store 11 / test_supabase_store 7 / test_ontology_writer 11 / **test_ontology_sync 4**）。
 
 ---
 

@@ -85,6 +85,34 @@ _writer = create_writer(CONFIG.ontology_store,
                         key=CONFIG.supabase_key,
                         schema=CONFIG.supabase_schema)
 
+
+def _reload_ontology() -> dict:
+    """运行时重新加载本体（多人编辑后刷新当前会话）。
+
+    重建 Ontology（从 store 重读）并刷新依赖它的 validator/translator/metadata。
+    工具函数访问模块级 _onto，reload 后新值自动生效；_executor 不依赖本体，无需重建。
+    """
+    global _onto, _validator, _translator, _metadata
+    store = create_store(CONFIG.ontology_store,
+                         base=CONFIG.ontology_dir,
+                         db=CONFIG.ontology_db,
+                         url=CONFIG.supabase_url,
+                         key=CONFIG.supabase_key,
+                         schema=CONFIG.supabase_schema)
+    _onto = Ontology(store=store)
+    _validator = MqlValidator(_onto)
+    _translator = Translator(_onto)
+    _metadata = MetadataService(_onto, db_path=str(DB))
+    return {
+        "ok": True,
+        "store": CONFIG.ontology_store,
+        "objects": len(_onto.objects),
+        "functions": len(_onto.functions),
+        "relations": len(_onto.relations),
+        "glossary": len(_onto.term_index),
+        "note": "本体已重新加载；当前会话后续查询使用最新本体",
+    }
+
 # 启动自检（P2）：fail-fast，启动即暴露配置/介质问题
 _STARTUP_CHECKS = run_startup_checks(_onto, _executor)
 for _c in _STARTUP_CHECKS:
@@ -477,9 +505,23 @@ def ontology_register(kind: str, entry: dict, user: str = "") -> dict:
             return {"error": f"不支持的注册类型: {kind}（支持 object/function/relation/glossary/config）"}
     except Exception as e:  # noqa: BLE001
         return {"error": f"本体注册失败: {e}"}
+    # 注册成功后自动重载本体：当前会话后续查询立即使用最新本体
+    reload = _reload_ontology()
     return {"ok": True, "kind": kind, "entry": entry,
             "store": CONFIG.ontology_store,
-            "note": "注册成功；如使用 Supabase 多人编辑，建议 ontology_export 导出 YAML 走评审"}
+            "reloaded": reload,
+            "note": "注册成功并已重载本体；如使用 Supabase 多人编辑，建议 ontology_export 导出 YAML 走评审"}
+
+
+@mcp.tool()
+@_audit_tool
+def ontology_reload() -> dict:
+    """运行时重新加载本体（多人编辑后刷新当前会话）。
+
+    从当前 store（yaml / supabase）重读并重建 Ontology 索引，刷新
+    validator/translator/metadata。多人协作场景下，其他成员通过
+    ontology_register 改了本体后，用本工具让当前会话读到最新。"""
+    return _reload_ontology()
 
 
 @mcp.tool()
