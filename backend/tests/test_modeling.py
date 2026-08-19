@@ -114,7 +114,8 @@ class ModelingTemplateTest(unittest.TestCase):
     def test_skill_exists_and_has_phases(self):
         self.assertTrue(self.SKILL.exists(), "modeling-workflow SKILL.md 缺失")
         text = self.SKILL.read_text(encoding="utf-8")
-        for phase in ["阶段 0", "阶段 1", "阶段 2", "阶段 3", "阶段 4",
+        # 阶段 2/3 已合并为「阶段 2/3：方案落地」，不再有独立「阶段 3」
+        for phase in ["阶段 0", "阶段 1", "阶段 2/3", "阶段 4",
                       "阶段 5", "阶段 6", "阶段 7"]:
             self.assertIn(phase, text, f"缺少 {phase}")
 

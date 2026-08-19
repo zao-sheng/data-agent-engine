@@ -1,6 +1,6 @@
 ---
 name: modeling-etl
-description: 路径 D——建模类需求（新建表 / ETL 管道 / 新建指标 / 改结构）。加载 modeling-workflow 规范，按「需求分析→方案→DDL/注册→ETL→测试→上线→调度→SLA/DQC」阶段化执行，每阶段先出逻辑报告、用户确认后才真实执行。
+description: 路径 D——建模类需求（新建表 / ETL 管道 / 新建指标 / 改结构）。加载 modeling-workflow 规范，按「需求分析→方案→落地(配对DDL+ETL)→测试→上线→调度→SLA/DQC」阶段化执行，每阶段先出逻辑报告（可编辑）、用户确认后才真实执行。
 ---
 
 # 路径 D：建模 / ETL 开发（阶段化，先报告后执行）
@@ -24,14 +24,15 @@ load warehouse-standards skill # 分层/主题/命名规范
 | 阶段 | MCP 工具 | 说明 |
 |------|---------|------|
 | 1 方案查重 | `mcp__dataagent__ontology_search` | 查目标对象/指标/表是否已存在 |
-| 2 DDL | `mcp__dataagent__ddl_generate` | Spark SQL 建表草稿 |
-| 2 本体注册 | 编辑 `backend/ontology/` | 对象/指标/属性/关系注册 |
-| 3 ETL | `mcp__dataagent__etl_generate` | Spark SQL INSERT OVERWRITE 草稿 |
+| 2/3 方案落地 | `mcp__dataagent__modeling_plan` | **一次生成配对 DDL+ETL 列表**（N 表=N 对，`summary.paired` 必须 True；严禁分开调 ddl/etl 造成数量不对应） |
+| 2/3 本体注册 | 编辑 `backend/ontology/` | 对象/指标/属性/关系注册 |
 | 6 调度 | `mcp__dataagent__scheduler_submit` | 预留：接入平台后真实提交 |
 | 7 SLA/DQC | 治理配置登记 | 预留：接入数据质量平台后自动登记 |
 
 ## 硬性规则
 - 任何 DDL/ETL/注册/调度/治理操作**必须用户确认后执行**，禁止自动落地。
+- **DDL 与 ETL 必须成对**：新增/加字段事实表一律用 `modeling_plan` 生成，
+  工具返回 `summary.paired=False` 或 `errors` 非空时先解决，禁止直接落地不完整方案。
 - 命名遵守 `warehouse-standards`；新建指标必须注册 Ontology 后方可被查询。
 - 全部过程留痕（审计日志）；用户拒绝某阶段则停止并记录原因。
 - 演示引擎统一 **Spark SQL**（DDL/ETL 均为 Hive 风格 Spark SQL）。

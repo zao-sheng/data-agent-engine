@@ -49,6 +49,7 @@ from core.confirm_token import ConfirmTokenStore  # noqa: E402
 from core.ddl_gen import generate_ddl  # noqa: E402
 from core.etl_gen import generate_etl  # noqa: E402
 from core.metadata import MetadataService  # noqa: E402
+from core.modeling_plan import generate_modeling_plan  # noqa: E402
 from core.query_token import QueryTokenStore  # noqa: E402
 from core.runtime_log import log_error, log_info, log_warn, setup_runtime_logger  # noqa: E402
 from core.startup_check import run_startup_checks, startup_status  # noqa: E402
@@ -396,6 +397,19 @@ def etl_generate(obj_name: str, layer: str, domain: str = "ord",
     （与翻译引擎多指标策略一致）。生成后需人工 Review + 走审批。"""
     return generate_etl(_onto, obj_name, layer, domain=domain, subject=subject,
                         metrics=metrics, dimensions=dimensions)
+
+
+@mcp.tool()
+@_audit_tool
+def modeling_plan(changes: list[dict]) -> dict:
+    """路径 D（方案落地）：变更清单 → 配对 DDL+ETL 列表。
+
+    每个变更: {type: create|add_field|modify_logic|register, obj_name, layer?,
+    domain?, subject?, metrics?, dimensions?}。
+    工具层强制配对：create/add_field 必须 DDL 与 ETL 成对（N 表 → N 对），
+    数量不一致会报错；modify_logic 仅 ETL；register 仅注册项。
+    返回每项的 editable 字段供确认环节逐项编辑。"""
+    return generate_modeling_plan(_onto, changes)
 
 
 @mcp.tool()

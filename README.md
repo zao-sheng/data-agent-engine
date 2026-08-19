@@ -108,7 +108,7 @@ git clone <repo> && cd data-agent-engine
 | 检索索引 | `ontology_search` 走加载期构建的倒排索引（名称/别名/展示名），O(1) 精确命中 + 前缀兜底，替代全量线性扫描 |
 | 默认 t-1 | 未识别时间参数 → 默认查昨天，回答标注 |
 | ETL（路径 D） | `ddl_generate` / `etl_generate` 已实现（Spark SQL，Hive 风格）；调度 `scheduler_submit` 预留待接平台 MCP |
-| 建模流程 | 路径 D 按 modeling-workflow 规范阶段化执行（需求分析→方案→DDL/注册→ETL→测试→上线→调度→SLA/DQC），每阶段先产出逻辑报告（需求识别表/方案书模板）→ 用户确认 → 才真实执行；缺失信息多轮澄清不臆造 |
+| 建模流程 | 路径 D 按 modeling-workflow 规范阶段化执行（需求分析→方案→落地→测试→上线→调度→SLA/DQC），需求表/方案书为**可编辑草稿**（来源标注：需求文档/用户input/待确认，逐项确认可改）；落地阶段用 modeling_plan **配对生成 DDL+ETL**（N 表=N 对，`summary.paired` 强制校验，防 2 DDL 配 1 ETL）；每阶段先出报告 → 确认 → 才执行 |
 | 查询令牌 | `semantic_translate` 签发 query_token（绑定 SQL、短 TTL），`execute_sql` 必须携带校验——禁止绕过翻译引擎执行裸 SQL（行级权限/表选择/口径过滤不可被绕过） |
 | 审计日志 | 所有 MCP 工具调用落 `backend/logs/audit.jsonl`（调用方/动作/入参摘要/耗时/结果规模），轮转清理不无限增长 |
 | 运行日志 | `backend/logs/runtime.jsonl` 记录启动自检/连接/异常等运行态，jsonl + 轮转；启动自检（ontology/介质/日志目录）fail-fast，`health_check` 工具返回引擎状态 |
