@@ -110,9 +110,13 @@ description: 建模全流程规范（路径 D）。从需求文档提取建模�
 3. **清单确认协议**：一次性输出所有 {DDL, ETL} 对的清单文本（每对带编号），
    一次 `ask_user_question`：「请整体确认，或指出要修改的对（编号+新值）」；
    **禁止**每对单独弹确认。
-4. **本体注册**：变更清单中 type=register 的项 → 编辑 `backend/ontology/`
-   （objects/functions/relations/glossary）→ 展示注册项清单（编号）→
-   一次整体确认 → 写入。
+4. **本体注册（双通道）**：变更清单中 type=register 的项 →
+   调用 `mcp__dataagent__ontology_register`（kind=object/function/relation/glossary/
+   config，entry=YAML 条目结构）→ 展示注册项清单（编号）→ 一次整体确认 → 写入。
+   - 写入目标由 `DATA_AGENT_ONTOLOGY_STORE` 决定：yaml=Git 评审文件 /
+     supabase=多人编辑真源（revision 乐观锁）；
+   - Supabase 模式注册后建议 `ontology_export` 导出 YAML 走评审闭环；
+   - sqlite 是只读产物，拒绝写入（提示写 YAML 后重新 `ontology_compile`）。
 5. 依赖检查：目标表依赖的明细/维表已存在（ontology_search 复核）。
 
 ## 阶段 4：测试

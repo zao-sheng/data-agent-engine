@@ -52,6 +52,7 @@ from core.intent import classify_intent  # noqa: E402
 from core.metadata import MetadataService  # noqa: E402
 from core.modeling_plan import generate_modeling_plan  # noqa: E402
 from core.ontology_store import create_store  # noqa: E402
+from core.ontology_writer import create_writer, writer_supports  # noqa: E402
 from core.query_token import QueryTokenStore  # noqa: E402
 from core.runtime_log import log_error, log_info, log_warn, setup_runtime_logger  # noqa: E402
 from core.startup_check import run_startup_checks, startup_status  # noqa: E402
@@ -76,6 +77,13 @@ _validator = MqlValidator(_onto)
 _translator = Translator(_onto)
 _executor = Executor(str(DB))
 _metadata = MetadataService(_onto, db_path=str(DB))
+
+# 本体写入器（多人编辑闭环）：按 store 类型分发（yaml 文件 / supabase 表）
+_writer = create_writer(CONFIG.ontology_store,
+                        base=CONFIG.ontology_dir,
+                        url=CONFIG.supabase_url,
+                        key=CONFIG.supabase_key,
+                        schema=CONFIG.supabase_schema)
 
 # 启动自检（P2）：fail-fast，启动即暴露配置/介质问题
 _STARTUP_CHECKS = run_startup_checks(_onto, _executor)
@@ -437,6 +445,41 @@ def modeling_plan(changes: list[dict]) -> dict:
     数量不一致会报错；modify_logic 仅 ETL；register 仅注册项。
     返回每项的 editable 字段供确认环节逐项编辑。"""
     return generate_modeling_plan(_onto, changes)
+
+
+@mcp.tool()
+@_audit_tool
+def ontology_register(kind: str, entry: dict, user: str = "") -> dict:
+    """路径 D（本体注册落地）：把对象/指标/关系/黑话写入本体存储。
+
+    kind: object | function | relation | glossary | config
+    entry: 与 YAML 条目结构一致的 dict（object 需 name、function 需 name+formula+owner…）
+    写入目标由 DATA_AGENT_ONTOLOGY_STORE 决定：
+      * yaml     —— 写 backend/ontology/*.yaml（Git 评审流，单机）
+      * supabase —— 写 Supabase 表（多人编辑真源，revision 乐观锁）
+      * sqlite   —— 只读产物，拒绝写入（提示写 YAML 后重新编译）
+    必须在用户确认后调用（modeling-workflow 阶段 2 本体注册）；返回落库结果。"""
+    kind = kind.lower()
+    try:
+        if kind == "object":
+            _writer.upsert_object(entry)
+        elif kind == "function":
+            _writer.upsert_function(entry)
+        elif kind == "relation":
+            _writer.upsert_relation(entry)
+        elif kind == "glossary":
+            _writer.upsert_glossary(entry)
+        elif kind == "config":
+            if "key" not in entry:
+                return {"error": "config 注册需要 entry.key"}
+            _writer.upsert_config(entry["key"], entry.get("value"))
+        else:
+            return {"error": f"不支持的注册类型: {kind}（支持 object/function/relation/glossary/config）"}
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"本体注册失败: {e}"}
+    return {"ok": True, "kind": kind, "entry": entry,
+            "store": CONFIG.ontology_store,
+            "note": "注册成功；如使用 Supabase 多人编辑，建议 ontology_export 导出 YAML 走评审"}
 
 
 @mcp.tool()

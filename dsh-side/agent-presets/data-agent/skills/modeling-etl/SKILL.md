@@ -28,7 +28,7 @@ load warehouse-standards skill # 分层/主题/命名规范
 |------|---------|------|
 | 1 方案查重 | `mcp__dataagent__ontology_search` | 查目标对象/指标/表是否已存在 |
 | 2/3 方案落地 | `mcp__dataagent__modeling_plan` | **一次生成配对 DDL+ETL 列表**（N 表=N 对，`summary.paired` 必须 True；严禁分开调 ddl/etl 造成数量不对应） |
-| 2/3 本体注册 | 编辑 `backend/ontology/` | 对象/指标/属性/关系注册 |
+| 2/3 本体注册 | `mcp__dataagent__ontology_register` | 对象/指标/属性/关系注册（yaml 文件 / supabase 真源双通道，确认后调用） |
 | 6 调度 | `mcp__dataagent__scheduler_submit` | 预留：接入平台后真实提交 |
 | 7 SLA/DQC | 治理配置登记 | 预留：接入数据质量平台后自动登记 |
 

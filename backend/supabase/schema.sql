@@ -201,23 +201,13 @@ COMMENT ON INDEX idx_objects_name     IS '按对象名查对象（管理端检�
 COMMENT ON INDEX idx_functions_name   IS '按指标名查指标（管理端检索）';
 
 -- ============================================================
--- RLS（默认关闭，生产按需启用）
--- 只读服务：anon 或 service_role 仅 SELECT
--- 管理端：authenticated 可写（或服务端用 service_role 写）
+-- RLS：见独立脚本 backend/supabase/rls.sql
+-- 生产启用行级安全时执行 rls.sql（6 表 anon 只读 / authenticated 可写），
+-- 本文件不内嵌策略，避免双份维护。
 -- ============================================================
--- ALTER TABLE ontology_objects   ENABLE ROW LEVEL SECURITY;
--- ALTER TABLE ontology_functions ENABLE ROW LEVEL SECURITY;
--- ALTER TABLE ontology_relations ENABLE ROW LEVEL SECURITY;
--- ALTER TABLE ontology_glossary  ENABLE ROW LEVEL SECURITY;
--- ALTER TABLE ontology_config    ENABLE ROW LEVEL SECURITY;
---
--- CREATE POLICY "read_all" ON ontology_objects   FOR SELECT USING (true);
--- CREATE POLICY "read_all" ON ontology_functions FOR SELECT USING (true);
--- CREATE POLICY "read_all" ON ontology_relations FOR SELECT USING (true);
--- CREATE POLICY "read_all" ON ontology_glossary  FOR SELECT USING (true);
--- CREATE POLICY "read_all" ON ontology_config    FOR SELECT USING (true);
---
--- CREATE POLICY "write_auth" ON ontology_objects
---   FOR ALL USING (auth.role() = 'authenticated')
---   WITH CHECK (auth.role() = 'authenticated');
--- -- ... 其余表同理
+-- 快速参考（完整策略见 rls.sql）：
+--   ALTER TABLE ontology_objects ENABLE ROW LEVEL SECURITY;
+--   CREATE POLICY "read_all" ON ontology_objects FOR SELECT USING (true);
+--   CREATE POLICY "write_auth" ON ontology_objects
+--     FOR ALL USING (auth.role() = 'authenticated')
+--     WITH CHECK (auth.role() = 'authenticated');
