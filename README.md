@@ -145,7 +145,7 @@ dsh-side/          setup_dsh.py + 「数据助理」预设模板 + 8 个 skills
 - [数据仓库规范](dsh-side/agent-presets/data-agent/skills/warehouse-standards/SKILL.md)
 - [建模流程规范](dsh-side/agent-presets/data-agent/skills/modeling-workflow/SKILL.md)
 - [环境变量配置说明](backend/.env.example)
-- [Supabase 本体存储接入方案](docs/supabase-ontology-store.md)
+- [本体存储模式对比（yaml vs sqlite vs supabase 选型）](docs/ontology-store-modes.md)
 
 ## License
 
