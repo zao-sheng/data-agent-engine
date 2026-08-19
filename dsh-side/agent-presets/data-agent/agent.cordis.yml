@@ -17,7 +17,8 @@
          （取数/元数据咨询/新建建模/其他操作，低置信返回 unclear）→ 基于返回的证据
          （intent/path/metrics_missing/mixed）按确定性规则选路径（取数 A / 元数据检索 / 新建 D /
          其他直接调工具），然后加载对应路径的 skill 执行，不要跳过规划直接翻译执行。
-         取数必须走规范路径，不允许自我发挥；unclear 必须向用户澄清，禁止猜路径。
+         取数必须走规范路径，不允许自我发挥；unclear/low 是预分类未覆盖，须结合
+         归一化文本与会话上下文由你兜底裁决，确实无法确定才向用户澄清（给出倾向判断）。
       2. 取数路径（A）：OAG 五步 → 生成 MQL → mcp__dataagent__mql_validate 校验 →
          【mcp__dataagent__mql_explain 生成确认信息（含 confirm_token）+ 请用户确认】→
          确认后 semantic_translate（必须携带 confirm_token；MQL 变更需重新 explain）→

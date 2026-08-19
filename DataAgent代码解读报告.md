@@ -196,7 +196,7 @@ translate()            入口：捕获 TranslateError/KeyError → {"error"}
 详见第 5 章「安全模型」。
 
 ### 3.9 `intent.py`（208 行）—— 意图识别（确定性预分类）
-plan-routing Step1 的结构化信号：实体识别（Ontology 指标/对象/黑话归一）+ 词表信号（取数/元数据结构词/建模动词/存量修改动词）→ 按序判定四类意图（取数 A / 元数据 / 建模 D / 存量操作）→ 输出 `{intent, confidence, path, evidence[], mixed[], metrics_missing}`。零 LLM、可单测、可入 eval 门禁；LLM 基于证据裁决，unclear/冲突必须澄清。
+plan-routing Step1 的结构化信号：实体识别（Ontology 指标/对象/黑话归一）+ 词表信号（取数/元数据结构词/建模动词/存量修改动词）→ 按序判定四类意图（取数 A / 元数据 / 建模 D / 存量操作）→ 输出 `{intent, confidence, path, evidence[], mixed[], metrics_missing}`。零 LLM、可单测、可入 eval 门禁；LLM 基于证据裁决，unclear/low 为预分类未覆盖（非错误），由 LLM 结合归一化文本与会话上下文兜底裁决，确实无法确定才向用户澄清（并给出倾向判断）。
 
 ---
 
@@ -210,7 +210,7 @@ server 启动：`setup_runtime_logger` → 构建 Ontology/Validator/Translator/
 | ontology_search | OAG | 文本→命中清单 | 倒排索引 O(1)，对象/指标/属性，只返回注册内容 |
 | ontology_traverse | OAG | 对象名→关系图 | BFS，含 join_key/required_filter/可达对象 |
 | term_normalize | OAG | 文本→{normalized, mappings} | 黑话归一（Step 0），回答按 mappings 回译 |
-| intent_classify | 规划 | 文本→{intent, path, confidence, evidence, mixed} | 意图预分类（plan-routing Step1）；unclear/冲突须澄清 |
+| intent_classify | 规划 | 文本→{intent, path, confidence, evidence, mixed} | 意图预分类（plan-routing Step1）；unclear/low 由 LLM 结合上下文兜底，仍不确定才澄清 |
 | metric_disambiguate | 识别 | 文本→{status, exact/family/candidates} | 指标族三级识别 |
 | mql_validate | 安全 | MQL→{ok, errors, warnings} | 物理渗入检测 + schema 校验 |
 | mql_explain | 确认 | MQL→中文确认信息 + **confirm_token** | 口径/版本/维度含义/过滤/时间展示；用户执行前必调 |

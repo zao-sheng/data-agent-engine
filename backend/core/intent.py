@@ -156,7 +156,7 @@ def classify_intent(onto: Ontology, text: str) -> dict:
         note = "存量操作：直接调用对应 MCP 工具（etl_generate / scheduler_submit 等），涉及口径变更仍需用户确认"
     elif opv and not obj_sig:
         intent = "unclear"
-        note = "检测到修改类动词但无存量对象提及，先澄清要改什么"
+        note = "检测到修改类动词但无存量对象提及：结合上下文判断改什么，无法确定再澄清"
     # ③ 元数据咨询（结构词命中；若同时有强取数动词 → 混合，主意图仍为 metadata）
     elif mv:
         intent = "metadata"
@@ -176,7 +176,7 @@ def classify_intent(onto: Ontology, text: str) -> dict:
     # ⑤ 低置信
     else:
         intent = "unclear"
-        note = "无足够信号：向用户澄清意图（取数/元数据/建模/其他），不要猜测路径"
+        note = "无足够信号：结合归一化文本与会话上下文由 LLM 兜底裁决意图，确实无法确定再向用户澄清（给出倾向判断）"
 
     # 置信度：证据条数 ≥2 且存在主意图专属信号 → high；1 类证据 → medium；否则 low
     if intent == "unclear":
