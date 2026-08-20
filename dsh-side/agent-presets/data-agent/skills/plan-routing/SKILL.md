@@ -73,12 +73,15 @@ description: 意图识别后的计划与路径选择（Plan Agent）。任何用
   │           │         │      → explore_execute → 观测；稳定后回 D 固化）
   │           │         └─ 否 → 结束，不查询不编造
   │           └─（不得自行降级/拼接/臆造未注册的指标或维度）
-  └─ intent=explore（探索信号命中）→ 直接走 E（explore-fallback），
-     用户可随时改选：NL / 纯 SQL（Monaco）/ 混合三模式
+  └─ intent=explore（探索信号 或 **会话内 SQL 输入**）→ 直接走 E
+     （explore-fallback）：零前端会话内交互——贴 SQL / NL 起草 / 混合
 ```
 
-> 探索意图信号：`intent_classify` 返回 `intent=explore`（"先看看/大概/探索/摸底/
-> 试试看"等 + 指标未命中）→ 路径 E。这是「未注册口径的先看数据」，不是常态取数。
+> 探索意图信号：`intent_classify` 返回 `intent=explore`——
+> ① "先看看/大概/探索/摸底/试试看"等探索词 + 指标未命中；
+> ② **用户直接粘贴 SQL**（SELECT/WITH 开头 + FROM，含 ```sql 代码块）。
+> 两者都走路径 E（explore-fallback），会话内完成，无需前端。
+> 这是「未注册口径的先看数据」，不是常态取数。
 
 ## Step 3 · 选择执行路径（确定性规则，按序判定）
 

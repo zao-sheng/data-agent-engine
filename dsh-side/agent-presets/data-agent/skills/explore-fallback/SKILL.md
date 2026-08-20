@@ -5,50 +5,54 @@ description: 探索性取数（路径 E）——指标未注册时，找数据�
 
 # 探索性取数（路径 E）
 
+## 零前端 · 会话内交互（推荐，无需 Monaco 集成）
+
+不需要独立前端——**直接在会话里完成探索**，三种方式任选：
+
+### 方式 A · 直接贴 SQL（最简单）
+用户在会话输入框直接粘贴/编写 SQL（支持裸 SQL 或 ```` ```sql ```` 代码块）：
+```
+用户: SELECT F.region_id, SUM(F.pay_amt) AS amt
+      FROM dwd_ord_pay_di F
+      JOIN dim_region R ON R.region_id = F.region_id
+      WHERE F.dt BETWEEN '20260801' AND '20260817'
+      GROUP BY F.region_id
+
+Agent: intent_classify 识别为 explore（path=E，SQL 输入信号）
+  → explore_validate(sql) 校验（表名白名单/只读/强制分区）
+  → explore_execute(sql, token) 执行 → 返回结果表
+```
+- 引擎自动识别 SQL 输入（以 SELECT/WITH 开头 + FROM），不走 NL 解析；
+- 校验失败会给出具体 errors（未注册表/缺分区/写操作），用户改 SQL 重贴即可；
+- 结果标注「⚠️ 探索路径结果（非注册口径）」。
+
+### 方式 B · 自然语言描述（NL）
+用户用 NL 说诉求（"先看看华东区支付金额分布"）：
+- 引擎识别 explore 意图 → 找表（metadata_search/traverse）→ **LLM 起草 SQL**
+- 把 SQL 以代码块展示给用户 → 询问"确认执行 / 修改后执行"（ask_user_question）
+- 用户确认 → explore_validate → explore_execute
+
+### 方式 C · 混合（推荐复杂分析）
+```
+NL 诉求 → LLM 起草 SQL 骨架（基于工具返回的表/字段）
+  → 代码块展示给用户 → 用户可要求修改（"再加门店维度"）
+  → 确认后 explore_validate → explore_execute
+```
+用户不需要懂完整 SQL 结构，通过对话增量修改（"加个城市维度/按周聚合"）。
+
 ## 触发条件（满足其一即进入）
-1. `intent_classify` 返回 `intent=explore`（探索信号 + 指标缺失，如"先看看支付数据长什么样"）；
+1. `intent_classify` 返回 `intent=explore`（探索信号 + 指标缺失，或 **会话内 SQL 输入**）；
 2. 取数缺指标/维度 → 已询问是否新建 → 用户**拒绝新建**但仍想先看数据（明确同意走探索）。
 
 > 指标已注册 → 走 A（query-metric）正式取数；用户要新建 → 走 D（modeling-etl）。
 > 探索是"未注册口径的先看数据"，不是绕过正式链的常态路径。
 
-## 三模式（用户可自行选择，前端 Monaco 编辑器）
-
-### 模式 1 · 自然语言（NL）
-适合：表述清晰、口径近似已有对象。
-```
-NL → 引擎 OAG/MQL 正式链（若可映射到近似指标）或经 explore 通道找表
-```
-- 先 `mcp__dataagent__intent_classify` + `metadata_search` + `ontology_search`；
-- 若能映射到已注册指标 → 走 A；否则按模式 2 引导用户。
-
-### 模式 2 · 纯 SQL（Monaco + dt-sql-parser）
-适合：**多表关联 / 百行千行复杂 SQL**（自然语言难以描述）。
-```
-Monaco 编辑器（SQL 高亮/补全/语法校验 by dt-sql-parser）
-  → 用户写/粘贴 SQL
-  → mcp__dataagent__explore_validate(sql)   # 表名白名单/只读/强制 dt 分区
-  → 通过 → mcp__dataagent__explore_execute(sql, explore_token)
-  → 结果回编辑器，可反复修改重跑（观测迭代）
-```
-- 表名只能来自 `metadata_search` / `ontology_search` / `ontology_traverse` 返回值
-  （工具已校验，防编造）；
-- SQL 必须带 `dt` 分区条件（防全表扫描）；只读 SELECT/CTE；
-- `explore_token` 绑定 SQL 指纹（120s），改 SQL 须重新 validate。
-
-### 模式 3 · 混合（推荐给复杂探索）
-适合：不知道表结构但有诉求，又不愿纯手写。
-```
-NL 诉求 → LLM 用工具返回的表/字段起草 SQL 骨架
-  → 骨架回填 Monaco 编辑器
-  → 用户人工精修（补 JOIN/过滤/聚合）
-  → explore_validate → explore_execute（同模式 2）
-```
-
-## 流程（模式 2/3 通用）
+## 通用流程（方式 A/B/C 共用）
 1. **找表**：`metadata_search("<主题>")` + `ontology_search` + `ontology_traverse`
-   拿到候选事实表 + 关联维度表 + JOIN 键（不猜表名）；
-2. **写 SQL**：Monaco 编辑或 LLM 起草后人工精修；
+   拿到候选事实表 + 关联维度表 + JOIN 键（不猜表名；贴 SQL 时此步跳过）；
+2. **写/取 SQL**：
+   - 方式 A：直接用用户贴的 SQL；
+   - 方式 B/C：LLM 起草后以代码块展示，用户确认或要求修改；
 3. **校验**：`explore_validate(sql)`——只读 + 表名白名单 + 强制 dt 分区；
    失败按 errors 修正后重试（最多 3 次）；
 4. **执行观测**：`explore_execute(sql, token)` → 结果集（≤1000 行）；

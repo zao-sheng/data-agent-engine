@@ -98,6 +98,27 @@ class ExploreIntentTest(unittest.TestCase):
         self.assertEqual(r["intent"], "query")
         self.assertNotEqual(r["path"], "E")
 
+    def test_pasted_sql_detected_as_explore(self):
+        """会话内直接贴 SQL（含小写/CTE/markdown 块）→ explore 路径。"""
+        cases = [
+            "SELECT region_id, COUNT(*) FROM dwd_ord_pay_di WHERE dt='20260817' GROUP BY region_id",
+            "  select F.region_id from dwd_ord_pay_di F where F.dt='1'",
+            "WITH t AS (SELECT * FROM dwd_ord_pay_di WHERE dt='1') SELECT COUNT(*) FROM t",
+            "```sql\nSELECT * FROM dwd_ord_pay_di WHERE dt='20260817'\n```",
+            # 多行 SQL（FROM 在行首）——真实粘贴场景
+            "SELECT R.region_name, SUM(F.pay_amt) AS gmv\n"
+            "FROM dwd_ord_pay_di F\n"
+            "JOIN dim_region R ON R.region_id = F.region_id\n"
+            "WHERE F.dt = '20260817'\n"
+            "GROUP BY R.region_name",
+            # 全换行紧凑格式
+            "SELECT\nF.region_id,\nCOUNT(*)\nFROM\ndwd_ord_pay_di F\nWHERE F.dt='1'",
+        ]
+        for sql in cases:
+            r = classify_intent(self.onto, sql)
+            self.assertEqual(r["intent"], "explore", sql)
+            self.assertEqual(r["path"], "E")
+
 
 if __name__ == "__main__":
     unittest.main()

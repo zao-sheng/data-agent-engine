@@ -79,6 +79,30 @@ PATH_BY_INTENT = {
 }
 
 
+def _is_sql_input(text: str) -> bool:
+    """检测用户输入是否为直接粘贴的 SQL（探索通道：会话内贴 SQL）。
+
+    特征：以 SELECT/WITH 开头（可含前导空格/换行/markdown 代码块围栏
+    ```sql ... ```），且含 FROM 子句（行首/空格前/换行前均可）。
+    这是「用户在会话中直接写/粘贴探索 SQL」的强信号——走探索执行通道
+    （explore_validate → explore_execute），而非 NL 语义解析。
+    """
+    head = text.strip()
+    # 剥离 markdown 代码块围栏：```sql\n...\n```
+    if head.startswith("```"):
+        lines = head.splitlines()
+        if len(lines) >= 3 and lines[-1].strip() == "```":
+            head = "\n".join(lines[1:-1])
+        else:
+            head = "\n".join(lines[1:])
+        head = head.strip()
+    head = head.lstrip("`").strip().lower()
+    if not head.startswith(("select ", "select\n", "with ", "with\n")):
+        return False
+    # FROM 子句：行首（\nfrom）或空格前（ from）均算
+    return " from " in head or "\nfrom" in head or head.endswith(" from")
+
+
 def _substring_hits(words: list[str], low: str) -> list[str]:
     """返回 low 中命中的词（去重保序）。"""
     seen, out = set(), []
@@ -117,9 +141,10 @@ def classify_intent(onto: Ontology, text: str) -> dict:
     """确定性意图分类。
 
     返回：
-      intent         — query / metadata / modeling / operation / unclear
+      intent         — query / metadata / modeling / operation / explore / unclear
+                       （explore 含两种来源：探索信号命中 或 会话内直接粘贴 SQL）
       confidence     — high / medium / low
-      path           — A / metadata / D / direct / clarify
+      path           — A / metadata / D / direct / E / clarify
       normalized_text— 术语归一后的文本
       metric_hits / object_hits — 命中实体（证据）
       evidence       — [{type, value, signal}] 证据链（供 LLM 引用/下游交叉验证）
@@ -159,11 +184,16 @@ def classify_intent(onto: Ontology, text: str) -> dict:
     intent: str
     note: str
 
-    # ① 建模（新建类动词，优先级最高）
-    if modv:
+    # ① 会话内直接粘贴 SQL（探索执行通道的最高优先信号）
+    if _is_sql_input(text):
+        intent = "explore"
+        note = ("检测到会话内 SQL 输入：走探索执行通道 E（explore_validate 校验 → "
+                "explore_execute 执行）——不经过 NL 语义解析；若含未注册表名会拒绝")
+    # ② 建模（新建类动词，优先级最高）
+    elif modv:
         intent = "modeling"
         note = "新建/建模意图：走路径 D（modeling-etl → modeling-workflow），先输出需求清单再整体确认"
-    # ② 探索（探索信号 + 指标缺失：未注册指标的探索性取数）
+    # ③ 探索（探索信号 + 指标缺失：未注册指标的探索性取数）
     elif ev and not metric_hits:
         intent = "explore"
         note = ("探索意图：指标未注册，走探索路径 E（explore-fallback）——找表 → 写 SQL → "
