@@ -48,6 +48,7 @@ from core.config import CONFIG  # noqa: E402
 from core.confirm_token import ConfirmTokenStore  # noqa: E402
 from core.ddl_gen import generate_ddl  # noqa: E402
 from core.etl_gen import generate_etl  # noqa: E402
+from core.entry_validator import EntryValidationError, validate_entry  # noqa: E402
 from core.intent import classify_intent  # noqa: E402
 from core.metadata import MetadataService  # noqa: E402
 from core.modeling_plan import generate_modeling_plan  # noqa: E402
@@ -457,7 +458,12 @@ def metadata_search(query: str) -> dict:
     返回结构化结果：tables(表信息) / metrics(指标口径) / lineage(加工逻辑) /
     readiness(就绪时间)。当前基于 Ontology 与样例库实现；接入真实元数据
     平台后由接口替换，返回结构不变。"""
-    return _metadata.search(query)
+    try:
+        return _metadata.search(query)
+    except Exception as e:  # noqa: BLE001 —— 缺陷②：不裸抛，返回结构化错误
+        return {"query": query, "tables": [], "metrics": [], "lineage": None,
+                "readiness": {"table": query, "ready_partition": "", "note": ""},
+                "error": f"元数据检索异常: {type(e).__name__}: {e}"}
 
 
 @mcp.tool()
@@ -511,10 +517,37 @@ def ontology_register(kind: str, entry: dict, user: str = "") -> dict:
       * yaml     —— 写 backend/ontology/*.yaml（发布基线快照，单机）
       * supabase —— 写 Supabase 表（多人编辑真源，revision 乐观锁）
       * sqlite   —— 只读产物，拒绝写入（提示写 YAML 后重新编译）
+
+    **合并语义**（重要）：
+      * 已存在条目（update）——按唯一键合并：省略字段保留原值（如 Region 省略
+        object_type 仍为 dim；最小更新可只提交要改的字段）
+      * 新建条目（create）——缺省字段落库默认值（status=active、object_type=fact、
+        version=v1.0 等）
+      * 更新 function 须携带 formula/owner（NOT NULL 列）；更新 object 无必填限制
+    写入前做字段级格式校验：非法值（如 pre_aggregated 传布尔、required_filters 传
+    字符串）返回 400 级错误并指明字段与期望类型，不会污染本体。
+
     必须在用户确认后调用（modeling-workflow 阶段 2 本体注册）；返回落库结果。"""
     kind = kind.lower()
     tables_meta: list[dict] = []
+    mode = "create"
     try:
+        # 判定 create/update（基于当前内存 Ontology 的唯一键存在性）
+        if kind == "object":
+            mode = "update" if entry.get("name") in _onto.objects else "create"
+        elif kind == "function":
+            mode = "update" if entry.get("name") in _onto.functions else "create"
+        elif kind == "relation":
+            mode = "update" if any(r.get("source") == entry.get("source") and
+                                   r.get("target") == entry.get("target") and
+                                   r.get("join_key") == entry.get("join_key")
+                                   for r in _onto.relations) else "create"
+        elif kind == "glossary":
+            mode = "update" if entry.get("term", "").strip().lower() in _onto.term_index else "create"
+        elif kind == "config":
+            mode = "update" if entry.get("key") in ("time_dimension", "partition_column") else "create"
+        # 缺陷①：写入前结构校验（字段级错误，不裸 400；update 模式只校验传入字段）
+        validate_entry(kind, entry, mode=mode)
         if kind == "object":
             _writer.upsert_object(entry)
             # 自动采集关联表的元数据（路径 D：建好本体同时采好表元数据）
@@ -528,11 +561,12 @@ def ontology_register(kind: str, entry: dict, user: str = "") -> dict:
         elif kind == "glossary":
             _writer.upsert_glossary(entry)
         elif kind == "config":
-            if "key" not in entry:
-                return {"error": "config 注册需要 entry.key"}
             _writer.upsert_config(entry["key"], entry.get("value"))
         else:
             return {"error": f"不支持的注册类型: {kind}（支持 object/function/relation/glossary/config）"}
+    except EntryValidationError as e:
+        return {"error": f"字段级错误: {e}",
+                "hint": "已存在条目为合并更新（省略字段保留）；新建缺省落默认值；function 更新须带 formula/owner"}
     except Exception as e:  # noqa: BLE001
         return {"error": f"本体注册失败: {e}"}
     # 注册成功后自动重载本体：当前会话后续查询立即使用最新本体。
@@ -542,7 +576,7 @@ def ontology_register(kind: str, entry: dict, user: str = "") -> dict:
         reloaded, reload_note = True, "注册成功并已重载本体"
     except Exception as e:  # noqa: BLE001
         reload, reloaded, reload_note = {}, False, f"注册成功，但重载本体失败（{e}），可稍后调用 ontology_reload"
-    return {"ok": True, "kind": kind, "entry": entry,
+    return {"ok": True, "kind": kind, "mode": mode, "entry": entry,
             "store": CONFIG.ontology_store,
             "reloaded": reloaded,
             "tables_metadata": {"collected": len(tables_meta),

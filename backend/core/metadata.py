@@ -180,11 +180,17 @@ class MetadataService:
 
     # ── 就绪时间 ─────────────────────────────────────────────
     def readiness(self, table: str) -> dict:
-        """表就绪时间：优先 ontology_tables（真源维护），回落本地约定 t-1。"""
+        """表就绪时间：优先 ontology_tables（真源维护），回落本地约定 t-1。
+
+        缺陷②修复：readiness 值统一字符串兜底（None → 空串），
+        上游可空字段 field or '' 处理，杜绝 join 序列混入 NoneType。
+        """
         table = table.lower()
         from_store = self._table_from_store(table)
-        if from_store and from_store.get("readiness"):
-            return {"table": table, "ready_partition": from_store["readiness"],
+        store_val = (from_store or {}).get("readiness")
+        if from_store and store_val:
+            return {"table": table,
+                    "ready_partition": str(store_val) or "",
                     "note": "来自 ontology_tables（Supabase 真源维护）"}
         return {"table": table, "ready_partition": "t-1（昨日）",
                  "note": "样例库由 seed.py 生成，分区就绪约定为 T+1；真实接入后由元数据平台提供"}
@@ -201,7 +207,8 @@ class MetadataService:
         tables = [table] if table else self.find_tables(q)
         metrics = self.find_metrics(q)
         lineage = self.lineage(q) if self.table_info(q) else None
-        readiness = self.readiness(q) if self.table_info(q) else None
+        # 缺陷②：readiness 永不返回 None（无命中时给空 dict 而非 None）
+        readiness = self.readiness(q) if self.table_info(q) else {"table": q, "ready_partition": "", "note": ""}
         # 无命中时给候选（表/指标清单）
         note = ""
         if not tables and not metrics:

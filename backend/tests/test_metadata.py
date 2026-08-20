@@ -88,6 +88,14 @@ class MetadataSearchTest(unittest.TestCase):
         self.assertEqual(r["metrics"], [])
         self.assertIn("候选表", r["note"])
 
+    def test_search_no_hit_readiness_is_empty_dict_not_none(self):
+        """缺陷②回归：无命中时 readiness 返回空 dict（ready_partition=''），
+        绝不返回 None（避免下游 join 序列混入 NoneType 崩溃）。"""
+        r = self.meta.search("退款 就绪时间 数据范围")
+        self.assertIsInstance(r["readiness"], dict)
+        self.assertEqual(r["readiness"].get("ready_partition", ""), "")
+        self.assertIn("ready_partition", r["readiness"])
+
     def test_all_tables(self):
         tables = self.meta.all_tables()
         self.assertGreaterEqual(len(tables), 10)

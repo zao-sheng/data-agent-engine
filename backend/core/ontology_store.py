@@ -249,12 +249,23 @@ class _UrllibGetClient:
         req = urllib.request.Request(full, headers={
             "apikey": self.key, "Authorization": f"Bearer {self.key}",
             "Accept-Profile": self.schema, **(headers or {})})
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                body = resp.read().decode()
-        except urllib.error.HTTPError as e:
-            body = e.read().decode()
-            raise RuntimeError(f"GET {path} 失败: HTTP {e.code} {body[:200]}") from e
+        # 网络抖动重试：timeout/URLError 重试 2 次（指数退避），HTTP 错误不重试
+        import time as _time
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    body = resp.read().decode()
+                break
+            except urllib.error.HTTPError as e:
+                body = e.read().decode()
+                raise RuntimeError(f"GET {path} 失败: HTTP {e.code} {body[:200]}") from e
+            except (urllib.error.URLError, TimeoutError, OSError) as e:
+                last_exc = e
+                if attempt < 2:
+                    _time.sleep(0.3 * (2 ** attempt))
+        else:
+            raise RuntimeError(f"GET {path} 失败（重试 3 次仍超时/网络错误）: {last_exc}") from last_exc
 
         class _Resp:
             def raise_for_status(self):

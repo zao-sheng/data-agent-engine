@@ -117,6 +117,13 @@ description: 建模全流程规范（路径 D）。从需求文档提取建模�
    config，entry=YAML 条目结构）→ 展示注册项清单（编号）→ 一次整体确认 → 写入。
    - 写入目标由 `DATA_AGENT_ONTOLOGY_STORE` 决定：yaml=发布基线文件 /
      supabase=多人编辑真源（revision 乐观锁）；
+   - **合并语义**（重要）：已存在条目为合并更新（**省略字段保留原值**，
+     可只提交要改的字段）；新建条目缺省字段落库默认值（status=active、
+     object_type=fact、version=v1.0）；**更新 function 必须携带 formula/owner**
+     （NOT NULL 列）；更新 object 无必填限制。
+   - **字段级校验**：register 写入前校验格式（pre_aggregated 必须是字典、
+     required_filters 必须是列表等），非法值返回字段级 400 错误——不要重试
+     写非法条目，按错误提示修正 entry 后重试。
    - Supabase 模式注册后建议 `ontology_export` 导出 YAML 走评审闭环；
    - sqlite 是只读产物，拒绝写入（提示写 YAML 后重新 `ontology_compile`）。
 5. 依赖检查：目标表依赖的明细/维表已存在（ontology_search 复核）。

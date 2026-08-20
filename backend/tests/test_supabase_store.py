@@ -88,6 +88,36 @@ class SupabaseStoreReadTest(unittest.TestCase):
         self.assertEqual(s_onto.normalize_terms("poi 的 goods"),
                          y_onto.normalize_terms("poi 的 goods"))
 
+    def test_get_retries_on_timeout(self):
+        """网络抖动重试：第一次超时第二次成功（附带发现修复）。"""
+        from core.ontology_store import _UrllibGetClient
+        import urllib.request
+        client = _UrllibGetClient("https://x.supabase.co", "key")
+        calls = {"n": 0}
+        def flaky(url, timeout=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise TimeoutError("handshake timed out")
+            resp = mock.MagicMock()
+            resp.read.return_value = b"[]"
+            resp.__enter__.return_value = resp
+            return resp
+        with mock.patch.object(urllib.request, "urlopen", side_effect=flaky):
+            resp = client.get("/rest/v1/ontology_config")
+            self.assertEqual(calls["n"], 2)
+            self.assertEqual(resp.json(), [])  # 无数据表返回空列表
+
+    def test_get_retries_exhausted_raises(self):
+        """3 次全部超时 → RuntimeError 且带重试说明。"""
+        from core.ontology_store import _UrllibGetClient
+        import urllib.request
+        client = _UrllibGetClient("https://x.supabase.co", "key")
+        with mock.patch.object(urllib.request, "urlopen",
+                               side_effect=TimeoutError("boom")):
+            with self.assertRaises(RuntimeError) as ctx:
+                client.get("/rest/v1/ontology_config")
+            self.assertIn("重试 3 次", str(ctx.exception))
+
     @mock.patch("core.ontology_store._supabase_client")
     def test_select_filters_deleted(self, mock_client):
         mock_client.return_value.return_value.get.side_effect = _fake_get
