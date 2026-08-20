@@ -78,9 +78,13 @@ description: 意图识别后的计划与路径选择（Plan Agent）。任何用
 ```
 
 > 探索意图信号：`intent_classify` 返回 `intent=explore`——
-> ① "先看看/大概/探索/摸底/试试看"等探索词 + 指标未命中；
-> ② **用户直接粘贴 SQL**（SELECT/WITH 开头 + FROM，含 ```sql 代码块）。
-> 两者都走路径 E（explore-fallback），会话内完成，无需前端。
+> ① "先看看/大概/探索/摸底/试试看"等探索词 + 指标未命中（`explore_mode=nl`）；
+> ② **用户直接粘贴 SQL**（SELECT/WITH 开头 + FROM，含 ```sql 代码块，
+>    `explore_mode=direct`）；
+> ③ **起草 SQL/骨架**类词（起草/骨架/生成 SQL/写个 SQL…，`explore_mode=mixed`）。
+> 三者都走路径 E（explore-fallback），会话内完成，无需前端。
+> **mode 决定交互方式**：direct=贴 SQL 直接执行；nl=NL 起草后确认；
+> mixed=先展示骨架等用户修改，不得直接执行。
 > 这是「未注册口径的先看数据」，不是常态取数。
 
 ## Step 3 · 选择执行路径（确定性规则，按序判定）

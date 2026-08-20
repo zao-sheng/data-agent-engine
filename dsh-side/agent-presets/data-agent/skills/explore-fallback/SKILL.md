@@ -32,13 +32,26 @@ Agent: intent_classify 识别为 explore（path=E，SQL 输入信号）
 - 把 SQL 以代码块展示给用户 → 询问"确认执行 / 修改后执行"（ask_user_question）
 - 用户确认 → explore_validate → explore_execute
 
-### 方式 C · 混合（推荐复杂分析）
+### 方式 C · 混合（推荐复杂分析）—— 触发词：起草 / 骨架 / 生成SQL
+
+`intent_classify` 命中「起草 SQL/骨架」类词（起草、骨架、生成 SQL、写个 SQL、
+我改改…）→ 返回 `explore_mode=mixed`。Agent 行为：
 ```
-NL 诉求 → LLM 起草 SQL 骨架（基于工具返回的表/字段）
-  → 代码块展示给用户 → 用户可要求修改（"再加门店维度"）
-  → 确认后 explore_validate → explore_execute
+NL 诉求 + 起草信号（explore_mode=mixed）
+  → 找表（metadata_search/traverse）→ LLM 起草 SQL 骨架
+  → 代码块展示给用户 → ask_user_question："确认执行 / 修改后执行"
+  → 用户可对话增量修改（"再加门店维度"、"按周聚合"）→ 改完再确认
+  → explore_validate → explore_execute
 ```
 用户不需要懂完整 SQL 结构，通过对话增量修改（"加个城市维度/按周聚合"）。
+**触发示例**（直接在会话输入）：
+- 「帮我起草个SQL看看华东区支付金额分布」
+- 「先给我个SQL骨架我改改，看下订单和退款数据」
+- 「生成SQL，探索一下门店维度的消费情况」
+
+> `explore_mode` 三值：`direct`（贴 SQL，方式 A）/ `nl`（NL 描述，方式 B）/
+> `mixed`（起草+精修，方式 C）。Agent 须按 mode 选择交互方式：
+> mode=mixed 时**必须先展示骨架并等用户确认/修改，不得直接执行**。
 
 ## 触发条件（满足其一即进入）
 1. `intent_classify` 返回 `intent=explore`（探索信号 + 指标缺失，或 **会话内 SQL 输入**）；

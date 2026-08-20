@@ -98,6 +98,26 @@ class ExploreIntentTest(unittest.TestCase):
         self.assertEqual(r["intent"], "query")
         self.assertNotEqual(r["path"], "E")
 
+    def test_explore_mode_detection(self):
+        """探索三模式识别：mixed（起草）/ nl（探索词）/ direct（贴 SQL）。"""
+        mixed_cases = [
+            "帮我起草个SQL看看华东区支付金额分布",
+            "先给我个SQL骨架我改改，看下订单和退款数据",
+            "生成SQL，探索一下门店维度的消费情况",
+        ]
+        for q in mixed_cases:
+            r = classify_intent(self.onto, q)
+            self.assertEqual(r["intent"], "explore", q)
+            self.assertEqual(r["explore_mode"], "mixed", q)
+        # NL 探索 → nl
+        r = classify_intent(self.onto, "先看看支付数据长什么样")
+        self.assertEqual(r["intent"], "explore")
+        self.assertEqual(r["explore_mode"], "nl")
+        # 贴 SQL → direct
+        r = classify_intent(self.onto, "SELECT * FROM dwd_ord_pay_di WHERE dt='1'")
+        self.assertEqual(r["intent"], "explore")
+        self.assertEqual(r["explore_mode"], "direct")
+
     def test_pasted_sql_detected_as_explore(self):
         """会话内直接贴 SQL（含小写/CTE/markdown 块）→ explore 路径。"""
         cases = [

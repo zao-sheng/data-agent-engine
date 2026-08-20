@@ -68,6 +68,18 @@ EXPLORE_WORDS = [
     "粗略", "大概", "初步看", "看下趋势", "看看趋势",
 ]
 
+# ── 混合模式信号（explore 的 mode=mixed）：用户想要「NL 起草 SQL 骨架 + 人工精修」──
+# 命中这些词 → 探索应走方式 C（LLM 起草骨架 → 代码块展示 → 用户对话增量修改），
+# 而非直接执行（方式 B）或贴 SQL（方式 A）。
+# 注意：避免与 OPERATION_WORDS（改配置/改口径…）冲突——"我改一下"太宽泛，
+# 必须带 sql/骨架 等上下文才判 mixed。
+MIXED_WORDS = [
+    "起草", "起草个sql", "起草个 SQL", "生成sql", "生成 SQL", "写个sql", "写个 SQL",
+    "sql骨架", "SQL骨架", "骨架", "给我sql", "给我 SQL", "先给我个sql",
+    "sql我改", "SQL我改", "sql我改改", "SQL我改改", "帮我写sql", "帮我写 SQL",
+    "生成一段sql", "生成一段 SQL", "试试写", "试着写",
+]
+
 # 意图 → 路径（与 plan-routing 的路径命名一致）
 PATH_BY_INTENT = {
     "query": "A",          # 取数 → query-metric
@@ -162,6 +174,7 @@ def classify_intent(onto: Ontology, text: str) -> dict:
     modv = _substring_hits(MODELING_WORDS, low)
     opv = _substring_hits(OPERATION_WORDS, low)
     ev = _substring_hits(EXPLORE_WORDS, low)
+    mxv = _substring_hits(MIXED_WORDS, low)
     obj_sig = bool(metric_hits or object_hits or _substring_hits(OPERATION_OBJECTS, low))
 
     evidence: list[dict] = []
@@ -179,33 +192,44 @@ def classify_intent(onto: Ontology, text: str) -> dict:
         evidence.append({"type": "operation_word", "value": w, "signal": "operation"})
     for w in ev:
         evidence.append({"type": "explore_word", "value": w, "signal": "explore"})
+    for w in mxv:
+        evidence.append({"type": "mixed_word", "value": w, "signal": "mixed"})
 
     mixed: list[dict] = []
     intent: str
     note: str
+    explore_mode: str = "nl"  # 探索交互模式：nl（NL 起草）| direct（贴 SQL）| mixed（NL 起草+人工精修）
 
     # ① 会话内直接粘贴 SQL（探索执行通道的最高优先信号）
     if _is_sql_input(text):
         intent = "explore"
+        explore_mode = "direct"
         note = ("检测到会话内 SQL 输入：走探索执行通道 E（explore_validate 校验 → "
                 "explore_execute 执行）——不经过 NL 语义解析；若含未注册表名会拒绝")
-    # ② 建模（新建类动词，优先级最高）
+    # ② 起草 SQL/骨架信号（方式 C 混合：NL 起草 + 人工精修）
+    elif mxv and not metric_hits:
+        intent = "explore"
+        explore_mode = "mixed"
+        note = ("探索意图（混合模式）：命中「起草 SQL/骨架」信号——先找表，LLM 起草 SQL "
+                "骨架以代码块展示，用户对话增量修改（加维度/过滤/聚合）后再执行；"
+                "不得直接执行未确认的 SQL")
+    # ③ 建模（新建类动词，优先级最高）
     elif modv:
         intent = "modeling"
         note = "新建/建模意图：走路径 D（modeling-etl → modeling-workflow），先输出需求清单再整体确认"
-    # ③ 探索（探索信号 + 指标缺失：未注册指标的探索性取数）
+    # ④ 探索（探索信号 + 指标缺失：未注册指标的探索性取数）
     elif ev and not metric_hits:
         intent = "explore"
         note = ("探索意图：指标未注册，走探索路径 E（explore-fallback）——找表 → 写 SQL → "
                 "受控执行观测；探索结果稳定后可走路径 D 固化注册")
-    # ③ 存量操作（修改类动词 + 存量提及，防止裸"改"误判）
+    # ⑤ 存量操作（修改类动词 + 存量提及，防止裸"改"误判）
     elif opv and obj_sig:
         intent = "operation"
         note = "存量操作：直接调用对应 MCP 工具（etl_generate / scheduler_submit 等），涉及口径变更仍需用户确认"
     elif opv and not obj_sig:
         intent = "unclear"
         note = "检测到修改类动词但无存量对象提及：结合上下文判断改什么，无法确定再澄清"
-    # ③ 元数据咨询（结构词命中；若同时有强取数动词 → 混合，主意图仍为 metadata）
+    # ⑥ 元数据咨询（结构词命中；若同时有强取数动词 → 混合，主意图仍为 metadata）
     elif mv:
         intent = "metadata"
         qs = _substring_hits(QUERY_STRONG, low)
@@ -214,14 +238,14 @@ def classify_intent(onto: Ontology, text: str) -> dict:
                           "reason": f"同时命中强取数信号: {qs[:3]}"})
         note = "元数据咨询：走 metadata_search（+ ontology_search/traverse 补充），不产生数值结果；" \
                + ("检测到混合取数诉求，先答口径再询问是否取数" if mixed else "")
-    # ④ 取数（指标命中；或取数词+时间/数值信号，指标缺失时标注 missing）
+    # ⑦ 取数（指标命中；或取数词+时间/数值信号，指标缺失时标注 missing）
     elif metric_hits:
         intent = "query"
         note = "取数意图：路径 A（OAG → MQL → 确认 → 翻译 → 执行）"
     elif qv:
         intent = "query"
         note = "取数意图但未命中注册指标：先告知缺失并询问是否新建，禁止近似替代"
-    # ⑤ 低置信
+    # ⑧ 低置信
     else:
         intent = "unclear"
         note = "无足够信号：结合归一化文本与会话上下文由 LLM 兜底裁决意图，确实无法确定再向用户澄清（给出倾向判断）"
@@ -250,6 +274,7 @@ def classify_intent(onto: Ontology, text: str) -> dict:
         "object_hits": object_hits,
         "evidence": evidence,
         "mixed": mixed,
+        "explore_mode": explore_mode,
         "metrics_missing": metrics_missing,
         "missing_metrics": missing_metrics,
         "note": note,
