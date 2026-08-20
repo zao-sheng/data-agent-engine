@@ -72,6 +72,39 @@ git clone <repo> && cd data-agent-engine
 
 > 每条提问都会经过：规划 → OAG 理解 → MQL 校验 → **确认环节** → 确定性翻译 → 口径标注回答。
 
+### 探索性取数示例（路径 E · 指标未注册时）
+
+探索路径支持三种会话内交互：**直接贴 SQL / NL 起草 / 混合**。以下示例可直接粘贴测试：
+
+**① 贴 SQL 探索（单表聚合）**
+```sql
+SELECT region_id, SUM(pay_amt) AS amt, COUNT(*) AS cnt
+FROM dwd_ord_pay_di
+WHERE dt = '20260817'
+GROUP BY region_id
+```
+→ 识别为探索路径（E）→ 校验（表名白名单/只读/分区）→ 返回区域聚合结果（非注册口径）。
+
+**② 多表 JOIN 探索（真实复杂场景）**
+```sql
+SELECT R.region_name, S.city, SUM(F.pay_amt) AS gmv
+FROM dwd_ord_pay_di F
+JOIN dim_region R ON R.region_id = F.region_id
+JOIN dim_store S ON S.store_id = F.store_id
+WHERE F.dt BETWEEN '20260801' AND '20260817'
+GROUP BY R.region_name, S.city
+ORDER BY gmv DESC LIMIT 5
+```
+→ 3 表 JOIN 全部通过表名白名单 → 返回 Top5 城市 GMV；也支持 markdown 代码块 / CTE 写法。
+
+**③ NL 探索意图**：说「先看看退款数据长什么样」→ `intent=explore, path=E`（对照：说「昨天的 GMV」仍走 A 正式取数，探索不影响正式链）。
+
+**④ 安全护栏（会被拒绝）**：`INSERT/DROP` 写操作、未注册表（`dwd_ord_fake_di`）、无 `dt` 分区条件的 SELECT——全部拒绝并给出原因。
+
+**⑤ 探索 → 固化（闭环）**：探索结果观测稳定后 → `explore_promote` 自动提取口径草稿（`SUM(pay_amt)` → 业务属性 `SUM(pay_amount)`，反查 field_mapping）→ 经 modeling_plan 确认 → `ontology_register` 注册 → 新指标立即可走 A 正式取数翻译。
+
+> 探索安全模型：与正式取数链物理隔离但同等受控——只读（禁写禁 DDL）+ 表名白名单 + 强制分区 + 探索令牌绑定 SQL 指纹。详见 [探索性取数工作流](docs/explore-workflow.md)。
+
 ## 架构
 
 ```
