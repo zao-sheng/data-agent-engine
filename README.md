@@ -146,6 +146,7 @@ dsh-side/          setup_dsh.py + 「数据助理」预设模板 + 8 个 skills
 - [代码解读报告（当前代码）](DataAgent代码解读报告.md)
 - [数据仓库规范](dsh-side/agent-presets/data-agent/skills/warehouse-standards/SKILL.md)
 - [建模流程规范](dsh-side/agent-presets/data-agent/skills/modeling-workflow/SKILL.md)
+- [探索性取数工作流（路径 E）](docs/explore-workflow.md)
 - [环境变量配置说明](backend/.env.example)
 - [本体存储模式对比（yaml vs sqlite vs supabase 选型）](docs/ontology-store-modes.md)
 - [指标平台 vs 本引擎架构对比报告](docs/architecture-comparison.md)
