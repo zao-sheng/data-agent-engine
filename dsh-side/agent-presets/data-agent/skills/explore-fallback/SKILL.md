@@ -57,9 +57,12 @@ NL 诉求 → LLM 起草 SQL 骨架（基于工具返回的表/字段）
    失败按 errors 修正后重试（最多 3 次）；
 4. **执行观测**：`explore_execute(sql, token)` → 结果集（≤1000 行）；
    可反复修改重跑（观测迭代，看口径/数据是否符合预期）；
-5. **固化反馈**：观测稳定后告知用户可走路径 D 固化——
-   探索 SQL 的 SELECT/WHERE/GROUP BY 可反推候选指标公式/维度/过滤，
-   供 `modeling_plan` + `ontology_register` 预填草稿。
+5. **固化（P2 桥接）**：观测稳定后 → `explore_promote(sql)` 自动提取口径草稿
+   （聚合表达式→候选指标公式、GROUP BY→维度、WHERE→required_filters、
+   源表→source_tables；物理列自动反查业务属性）：
+   - 草稿为 `status=draft`（未激活），**必须经用户确认**（modeling_plan 清单确认）；
+   - 确认后 `ontology_register` 固化（公式用业务属性名，翻译引擎自动映射回物理列）；
+   - 未映射的物理列会列入 unmapped_columns（人工补 field_mapping，不臆造）。
 
 ## 禁止
 - 禁止写库/DDL/任何非 SELECT 语句（explore_execute 已强制）；

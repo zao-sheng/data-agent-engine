@@ -51,6 +51,7 @@ from core.etl_gen import generate_etl  # noqa: E402
 from core.entry_validator import EntryValidationError, validate_entry  # noqa: E402
 from core.explore import (
     candidate_tables, extract_tables, validate_explore_sql)  # noqa: E402
+from core.explore_promote import build_register_draft  # noqa: E402
 from core.intent import classify_intent  # noqa: E402
 from core.metadata import MetadataService  # noqa: E402
 from core.modeling_plan import generate_modeling_plan  # noqa: E402
@@ -601,6 +602,25 @@ def ontology_reload() -> dict:
     validator/translator/metadata。多人协作场景下，其他成员通过
     ontology_register 改了本体后，用本工具让当前会话读到最新。"""
     return _reload_ontology()
+
+
+@mcp.tool()
+@_audit_tool
+def explore_promote(sql: str) -> dict:
+    """探索固化（P2）：探索 SQL → 口径提取 → 路径 D 注册草稿。
+
+    把探索 SQL 的 SELECT/WHERE/GROUP BY/FROM 反推为候选指标/维度/过滤/源表，
+    生成 modeling_plan 的 register 变更项草稿（可编辑）：
+      1. function 草稿：每个聚合表达式 → 候选指标（formula/owner/required_filters/
+         supported_dimensions），status=draft（未激活）
+      2. object 草稿：SQL 引用的未注册表 → 候选对象（需先建表或补映射）
+
+    物理列 → 业务属性自动反查 Ontology field_mapping；反查不到的列
+    列入 unmapped_columns（人工补，不臆造）。
+
+    注意：生成的是**草稿**，必须经用户确认（modeling_plan 清单确认协议）后
+    才可 ontology_register 固化。"""
+    return build_register_draft(_onto, sql)
 
 
 @mcp.tool()

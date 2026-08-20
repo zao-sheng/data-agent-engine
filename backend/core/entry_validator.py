@@ -101,11 +101,16 @@ def _validate_function(entry: dict, mode: str = "create") -> None:
     """
     # 唯一键：两种模式都必填
     _expect_type(entry, "name", "字符串", lambda v: isinstance(v, str) and v.strip(), required=True)
-    # 必填标量（create 全量 / update 只校验传入）
-    for f in ("display_name", "description", "formula", "owner",
-              "domain", "category", "data_owner", "unit"):
+    # 核心必填（create 全量 / update 只校验传入）：
+    # display_name/description/formula/owner/domain 是指标可用的最小集
+    for f in ("display_name", "description", "formula", "owner", "domain"):
         _expect_type(entry, f, "字符串", lambda v: isinstance(v, str) and v.strip(),
                      required=(mode == "create"))
+    # 治理字段（category/data_owner/unit）：可选——探索固化草稿（draft）阶段
+    # 可省略，人工确认时补；DB 有默认值（''）
+    for f in ("category", "data_owner", "unit"):
+        if f in entry and entry[f] is not None:
+            _expect_type(entry, f, "字符串", lambda v: isinstance(v, str), required=False)
     # 枚举/默认（update 模式不补默认，避免覆盖原值）
     _expect_enum(entry, "status", STATUSES, required=False, default="active", mode=mode)
     _expect_type(entry, "version", "字符串（默认 v1.0）",
