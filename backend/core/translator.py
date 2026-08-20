@@ -19,16 +19,8 @@ from __future__ import annotations
 
 import re
 
+from .mql_schema import FORMULA_FNS, IDENT_RE, OP_SQL, PHYSICAL_RE, REL_RE
 from .ontology_loader import Ontology
-
-FORMULA_FNS = {"SUM", "COUNT", "AVG", "MAX", "MIN", "DISTINCT"}
-IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-PROP_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-PHYSICAL_RE = re.compile(r"(?i)\b(dwd|dws|ads|dim|ods)_[a-z0-9_]+")
-REL_RE = re.compile(r"^-(\d+)d$")
-
-OP_SQL = {"eq": "=", "neq": "<>", "gt": ">", "gte": ">=", "lt": "<", "lte": "<=",
-          "like": "LIKE"}
 
 GRAN_UP = {"week", "month", "quarter", "year"}
 
@@ -287,7 +279,7 @@ class Translator:
         fm = t.get("field_mapping", {})
         for m, fn in items:
             # 公式字段 → 所选事实表的物理列（查 field_mapping，不依赖全局属性注册）
-            props = [p for p in PROP_RE.findall(fn["formula"]) if p in fm]
+            props = [p for p in IDENT_RE.findall(fn["formula"]) if p in fm]
             cols = {p: fm[p] for p in props}
             out.append(f"({self._compile_formula(fn['formula'], cols)}) AS {m['name']}")
         return out
@@ -403,7 +395,7 @@ class Translator:
     # ── WHERE ───────────────────────────────────────────────
     def _map_required(self, cond: str, fact_table: str, fact_obj: str) -> str:
         out = cond
-        tokens = sorted(set(PROP_RE.findall(cond)), key=len, reverse=True)
+        tokens = sorted(set(IDENT_RE.findall(cond)), key=len, reverse=True)
         for p in tokens:
             if p in FORMULA_FNS:
                 continue

@@ -7,13 +7,8 @@ from __future__ import annotations
 
 import re
 
+from .mql_schema import GRANULARITIES, OPERATORS, PHYSICAL_RE
 from .ontology_loader import Ontology
-
-# 物理表名特征（真实数仓的前缀约定，兜底强信号）
-PHYSICAL_RE = re.compile(r"(?i)\b(dwd|dws|ads|dim|ods)_[a-z0-9_]+")
-
-OPERATORS = {"eq", "neq", "gt", "gte", "lt", "lte", "in", "not_in", "like", "between"}
-GRANULARITIES = {"day", "week", "month", "quarter", "year"}
 
 
 class MqlValidator:

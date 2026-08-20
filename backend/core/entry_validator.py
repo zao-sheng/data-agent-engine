@@ -14,16 +14,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from .mql_schema import GRANULARITIES
+
 # ── 枚举/取值域（与 schema.sql COMMENT 一致）─────────────────
 OBJECT_TYPES = {"fact", "dim"}
 STATUSES = {"active", "draft", "deprecated"}
 SECURITY_LEVELS = {"L1", "L2", "L3"}
 UPDATE_FREQUENCIES = {"T+1", "小时", "实时"}
 PROPERTY_TYPES = {"string", "decimal", "date", "int", "integer", "bigint"}
-LAYERS = {"DWD", "DWS", "ADS", "DIM"}
+LAYERS = {"ODS", "DWD", "DWS", "ADS", "DIM"}  # 与 metadata.LAYER_CN / mql_schema.PHYSICAL_RE 一致
 AUTHORITIES = {"gold", "silver", "bronze"}
-GRANULARITIES = {"day", "week", "month", "quarter", "year"}
-FORMULA_FNS = {"SUM", "COUNT", "AVG", "MAX", "MIN", "DISTINCT"}
 GLOSSARY_TYPES = {"object", "property", "metric"}
 CARDINALITIES = {"N:1", "1:N", "1:1"}
 
@@ -79,15 +79,15 @@ def _expect_enum(entry: dict, field: str, allowed: set[str],
 
 
 def _expect_list_of_str(entry: dict, field: str, required: bool = True) -> None:
-    def chk(v):
+    def _is_str_list(v):
         return isinstance(v, list) and all(isinstance(x, str) for x in v)
-    _expect_type(entry, field, "字符串列表（如 ['is_valid = 1']）", chk, required)
+    _expect_type(entry, field, "字符串列表（如 ['is_valid = 1']）", _is_str_list, required)
 
 
 def _expect_dict(entry: dict, field: str, required: bool = True) -> None:
-    def chk(v):
+    def _is_dict(v):
         return isinstance(v, dict) and not isinstance(v, bool)
-    _expect_type(entry, field, "字典（如 {'refund_count': 'refund_cnt'}）", chk, required)
+    _expect_type(entry, field, "字典（如 {'refund_count': 'refund_cnt'}）", _is_dict, required)
 
 
 # ── 各 kind 校验器 ──────────────────────────────────────────

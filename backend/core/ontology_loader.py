@@ -1,6 +1,6 @@
 """Ontology：从原始本体数据构建索引（对象/函数/关系/属性归属/黑话/搜索）。
 
-数据源由 OntologyStore 提供（YAML 默认 / SQLite 编译缓存 / Supabase 预留），
+数据源由 OntologyStore 提供（YAML 默认 / SQLite 编译缓存 / Supabase 真源），
 本类只负责「原始数据 → 索引」，与存储解耦（见 core/ontology_store.py）。
 
 翻译引擎（JOIN 链）与 MQL 校验器（属性存在性）都以这里的索引为准。
@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from collections import deque
 from pathlib import Path
-from typing import Any
 
 from .ontology_store import OntologyData, OntologyStore, YamlOntologyStore
 

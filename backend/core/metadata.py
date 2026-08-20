@@ -12,34 +12,15 @@
 """
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 from typing import Any
 
 from .ontology_loader import Ontology
+from .table_metadata import LINEAGE  # 血缘单一数据源（table_metadata 采集入库用同一份）
 
 # 层 → 中文名
 LAYER_CN = {"ODS": "贴源层", "DWD": "明细层", "DWS": "汇总层",
             "ADS": "应用层", "DIM": "维度层"}
-
-# 表加工逻辑（血缘）示例：真实场景来自元数据平台 lineage，这里从样例 ETL 语义推导
-# key = 汇总/应用表名，value = 来源表 + 加工说明
-_LINEAGE: dict[str, dict] = {
-    "dws_ord_order_1d": {"source": "dwd_ord_order_di",
-                         "logic": "按 dt/region_id/store_id 聚合：订单量、有效订单量、下单金额、下单用户数"},
-    "dws_ord_pay_1d": {"source": "dwd_ord_pay_di",
-                       "logic": "按 dt/region_id/store_id 聚合：支付笔数、支付金额、支付用户数（过滤 is_valid=1）"},
-    "dws_ord_consume_1d": {"source": "dwd_ord_consume_di",
-                           "logic": "按 dt/region_id/store_id 聚合：消费笔数、消费金额、消费用户数（过滤 is_valid=1）"},
-    "dws_ord_refund_1d": {"source": "dwd_ord_refund_di",
-                          "logic": "按 dt/region_id/store_id 聚合：退款笔数、退款金额（过滤 is_valid=1）"},
-    "ads_ord_gmv_1d": {"source": "dwd_ord_pay_di",
-                       "logic": "按 dt 聚合：GMV（SUM(pay_amt)，过滤 is_valid=1）"},
-    "ads_ord_gmv_1m": {"source": "dwd_ord_pay_di",
-                       "logic": "按月聚合：GMV、支付笔数（过滤 is_valid=1）"},
-    "ads_ord_user_1d": {"source": "dwd_ord_pay_di",
-                        "logic": "按 dt 聚合：活跃用户数（样例置 0）、下单用户数、新用户数（样例置 0）"},
-}
 
 
 class MetadataService:
@@ -168,8 +149,8 @@ class MetadataService:
             lin = from_store["lineage"]
             return {"table": table, "source": lin.get("source", ""),
                     "logic": lin.get("logic", "")}
-        if table in _LINEAGE:
-            return {"table": table, **_LINEAGE[table]}
+        if table in LINEAGE:
+            return {"table": table, **LINEAGE[table]}
         # DWD 明细无上游加工（贴源），返回空
         for obj_name, o in self.onto.objects.items():
             for t in o.get("source_tables", []):

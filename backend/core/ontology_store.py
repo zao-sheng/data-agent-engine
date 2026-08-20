@@ -1,6 +1,6 @@
 """本体存储接口（Ontology Store）：把「本体数据从哪来」与「Ontology 索引构建」解耦。
 
-设计动机（为 Supabase 铺路）：
+设计：
   * Ontology（ontology_loader）只关心「原始数据 → 索引」——数据源可以是
     YAML 文件（发布基线快照）、SQLite 编译缓存（发布产物）、Supabase（多人编辑真源）
   * 换存储只实现一个新 Store 子类，Ontology 与全部调用方（translator /
@@ -10,7 +10,7 @@
 实现：
   * YamlOntologyStore —— 默认实现（读 backend/ontology/*.yaml）
   * SqliteOntologyStore —— 编译缓存（YAML → SQLite，发布时预构建）
-  * SupabaseOntologyStore —— 预留（接入 Supabase 后实现同一接口，见文档）
+  * SupabaseOntologyStore —— 多人编辑真源（PostgREST HTTP，urllib 零依赖）
 """
 from __future__ import annotations
 

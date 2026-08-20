@@ -11,7 +11,6 @@ Ontology 与调用方零改动。
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -80,11 +79,6 @@ class YamlOntologyWriter:
                         encoding="utf-8")
 
 
-def create_writer(kind: str, base: Path | str | None = None,
-                  url: str | None = None, key: str | None = None,
-                  schema: str = "public") -> Any:
-    """按 store 类型创建写入器。sqlite 不支持写入（只读产物）。"""
-    kind = (kind or "yaml").lower()
 class ReadOnlyWriter:
     """只读存储的写入占位（sqlite 编译产物）：所有写操作明确报错。
 

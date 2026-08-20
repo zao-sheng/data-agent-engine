@@ -3,7 +3,7 @@
 输入：
   * SQLite 样例库（PRAGMA table_info 拿字段）
   * Ontology（对象名/层归属）
-  * 血缘逻辑（seed.py 聚合语义 / metadata._LINEAGE）
+  * 血缘逻辑（seed.py 聚合语义 / LINEAGE 常量——metadata.py 亦引用同一份）
 
 输出：15 张表的完整元数据 [{table_name, layer, domain, subject, description,
       granularity, partition_col, owner_object, fields[], lineage{}, readiness}]
@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Any
 
 from .ontology_loader import Ontology
 

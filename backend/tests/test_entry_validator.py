@@ -93,8 +93,11 @@ class EntryValidatorTest(unittest.TestCase):
         self.assertIn("properties[0].type", str(ctx.exception))
 
     def test_source_table_layer_enum_rejected(self):
+        """layer 枚举含 ODS/DWD/DWS/ADS/DIM；非法层（如 XX）→ 字段级错误。"""
         o = _valid_object()
         o["source_tables"][0]["layer"] = "ODS"
+        validate_entry("object", o)  # ODS 合法（与 metadata.LAYER_CN 一致）
+        o["source_tables"][0]["layer"] = "XX"
         with self.assertRaises(EntryValidationError) as ctx:
             validate_entry("object", o)
         self.assertIn("layer", str(ctx.exception))

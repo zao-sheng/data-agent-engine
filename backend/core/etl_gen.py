@@ -16,10 +16,10 @@ from __future__ import annotations
 import re
 
 from .ddl_gen import table_name
+from .mql_schema import FORMULA_FNS, IDENT_RE
 from .ontology_loader import Ontology
 
-FORMULA_FNS = {"SUM", "COUNT", "AVG", "MAX", "MIN", "DISTINCT"}
-PROP_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+PROP_RE = IDENT_RE  # 兼容别名（公式/条件 token 提取，同一正则）
 
 
 class EtlGenError(Exception):
