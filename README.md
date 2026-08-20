@@ -99,8 +99,8 @@ backend/
 │                  ddl_gen/etl_gen/modeling_plan/intent/ontology_store/ontology_writer/
 │                  query_token/confirm_token/audit/runtime_log/startup_check/config）
 ├── mcp_servers/   FastMCP 入口（17 个工具）
-├── supabase/      schema.sql（7 张表建表）+ rls.sql（权限）+ migration_*.sql（增量迁移）
-├── tests/         12 文件 134 项单测
+├── supabase/      schema.sql（7 张表建表，含全部治理列）+ rls.sql（权限）
+├── tests/         12 文件 138 项单测
 └── eval/          Golden Dataset（29 条）+ 评测门禁
 dsh-side/          setup_dsh.py + 「数据助理」预设模板 + 8 个 skills
 ```

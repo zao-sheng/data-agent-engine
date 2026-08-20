@@ -93,7 +93,7 @@ CI → ontology_sync_check（YAML ↔ Supabase 一致性）
 `object_type`（fact/dim）、`status`（active/draft/deprecated）、`data_owner`、`tags`、
 `security_level`、`update_frequency`；指标带 `domain/category/status/data_owner/unit/tags`；
 关系带 `description`（业务语义）。跨域查询按 `domain` 路由，废弃对象/表自动跳过。
-旧库升级：执行 `backend/supabase/migration_2025_ontology_enrich.sql` 后重新 `ontology_import`。
+新装实例直接执行 `schema.sql` 即含全部治理列（无需额外迁移）。
 
 ---
 
