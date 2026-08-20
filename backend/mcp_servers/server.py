@@ -27,6 +27,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import time
 import warnings
@@ -368,28 +369,77 @@ def mql_explain(mql: dict) -> dict:
             "confirm_token": _confirm_store.issue(mql)}
 
 
+def _metric_dimension(fn: dict) -> str:
+    """指标量纲：count（计数：公式含 COUNT）| amount（金额：SUM 且无 COUNT）| other。"""
+    formula = fn.get("formula", "")
+    if "COUNT" in formula.upper():
+        return "count"
+    if "SUM" in formula.upper():
+        return "amount"
+    return "other"
+
+
+def _query_dimension(q: str) -> str | None:
+    """从查询词推断用户要的量纲：订单/单/数量/多少单/笔/人数 → count；
+    金额/多少钱/额/钱 → amount；无信号 → None。"""
+    count_hint = ["订单", "单数", "多少单", "数量", "多少个", "笔数", "笔", "人数",
+                  "用户数", "次数", "count", "量", "单"]
+    amount_hint = ["金额", "多少钱", "多少元", "钱", "额", "金额数", "gmv", "客单价"]
+    low = q.lower()
+    for w in count_hint:
+        if w in low:
+            return "count"
+    for w in amount_hint:
+        if w in low:
+            return "amount"
+    return None
+
+
 @mcp.tool()
 @_audit_tool
 def metric_disambiguate(query: str) -> dict:
     """指标歧义识别（多口径指标族）：精确命中 → 返回 exact；
     命中指标族（如 GMV 有支付/下单/消费口径）→ 返回 family 全部变体及差异，供用户确认；
-    未命中 → 返回候选。"""
+    未命中 → 返回候选。
+
+    **量纲感知**（防跨量纲误替）：查询含量纲信号（订单/单/数量 → 计数；
+    金额/多少钱 → 金额）时，命中指标若量纲不符（如查"消费订单数"却命中
+    金额指标 consume_gmv）→ 不返回 exact，降级到 candidates 并标注
+    dimension_mismatch——**跨量纲（单数 vs 金额）绝不可作为替代候选**。
+    """
     q = query.strip().lower()
+    q_dim = _query_dimension(q)
     exact = None
+    mismatch_reason: str | None = None
+
     # ① 黑话命中（glossary 中 type=metric 的条目，如"成交额"→gmv）
     ti = _onto.term_index.get(q)
     if ti and ti["type"] == "metric":
-        exact = _onto.functions.get(ti["canonical"])
+        cand = _onto.functions.get(ti["canonical"])
+        if cand and q_dim and _metric_dimension(cand) != q_dim:
+            mismatch_reason = (f"黑话 {q!r} 命中 {cand['name']}（{cand.get('display_name')}），"
+                               f"量纲为 {_metric_dimension(cand)}，与查询的量纲 {q_dim} 不符——跨量纲不可替代")
+        else:
+            exact = cand
     # ② 口径词优先（"支付GMV" → 支付口径变体）
     if exact is None:
         for f in _onto.functions.values():
             vl = f.get("variant_label", "")
             if vl and vl.replace("口径", "") in q:
-                exact = f
+                if q_dim and _metric_dimension(f) != q_dim:
+                    mismatch_reason = (f"口径词 {vl!r} 命中 {f['name']}（{f.get('display_name')}），"
+                                       f"量纲为 {_metric_dimension(f)}，与查询的量纲 {q_dim} 不符——跨量纲不可替代")
+                else:
+                    exact = f
                 break
     # ③ 精确指标名
     if exact is None and q in _onto.functions:
-        exact = _onto.functions[q]
+        f = _onto.functions[q]
+        if q_dim and _metric_dimension(f) != q_dim:
+            mismatch_reason = (f"指标名 {q!r} 命中 {f['name']}，量纲为 {_metric_dimension(f)}，"
+                               f"与查询的量纲 {q_dim} 不符——跨量纲不可替代")
+        else:
+            exact = f
     # ④ 族匹配
     family = None
     for fam, entry in _onto.families.items():
@@ -399,6 +449,7 @@ def metric_disambiguate(query: str) -> dict:
                 f = _onto.functions[v]
                 variants.append({"name": v, "display_name": f["display_name"],
                                  "formula": f["formula"],
+                                 "metric_type": _metric_dimension(f),
                                  "required_filters": f.get("required_filters", []),
                                  "do_not": f.get("do_not", ""),
                                  "is_default": v == entry["default"]})
@@ -414,19 +465,45 @@ def metric_disambiguate(query: str) -> dict:
     else:
         status = "none"
 
-    out = {"status": status, "query": query}
+    out = {"status": status, "query": query,
+           "query_dimension": q_dim}
     if exact:
         out["exact"] = {"name": exact["name"], "display_name": exact["display_name"],
                         "formula": exact["formula"], "version": exact.get("version"),
                         "variant_label": exact.get("variant_label"),
                         "family": exact.get("family"),
+                        "metric_type": _metric_dimension(exact),
                         "domain": exact.get("domain", "unknown"),
                         "status": exact.get("status", "active"),
                         "owner": exact.get("owner", "")}
     if family:
         out["family"] = family
-    if status == "none":
-        out["candidates"] = sorted(_onto.functions)
+    if mismatch_reason:
+        out["dimension_mismatch"] = mismatch_reason
+        # 跨量纲命中不当作 exact → 候选给同量纲指标
+        status = "none"
+        out["status"] = "none"
+    if status == "none" and not exact:
+        # 候选：优先「同量纲 + 语义相关」（display_name/别名/名含查询 token），
+        # 其次同量纲全部；查询无量纲信号时给全部
+        if q_dim:
+            def _rel(name: str, f: dict) -> bool:
+                hay = (f.get("display_name", "") + name + f.get("variant_label", "")
+                       + f.get("family", "")).lower()
+                # 语义相关：查询中的中文子串（长度≥2）或英文 token 命中候选文本
+                cn_parts = re.findall(r"[\u4e00-\u9fff]+", q)
+                en_toks = re.findall(r"[a-z0-9_]+", q)
+                for s in cn_parts:
+                    for i in range(len(s) - 1):
+                        if s[i:i+2] in hay:
+                            return True
+                return any(t in hay for t in en_toks if len(t) >= 2)
+            same = [(n, f) for n, f in _onto.functions.items()
+                    if _metric_dimension(f) == q_dim]
+            related = [n for n, f in same if _rel(n, f)]
+            out["candidates"] = related or [n for n, _ in same]
+        else:
+            out["candidates"] = sorted(_onto.functions)
     return out
 
 
