@@ -28,9 +28,10 @@ Agent: intent_classify 识别为 explore（path=E，SQL 输入信号）
 
 ### 方式 B · 自然语言描述（NL）
 用户用 NL 说诉求（"先看看华东区支付金额分布"）：
-- 引擎识别 explore 意图 → 找表（metadata_search/traverse）→ **LLM 起草 SQL**
+- 引擎识别 explore 意图 → 找表（metadata_search）→ **LLM 起草 SQL**
 - 把 SQL 以代码块展示给用户 → 询问"确认执行 / 修改后执行"（ask_user_question）
-- 用户确认 → explore_validate → explore_execute
+- **用户确认后** → explore_validate → explore_execute
+- ⚠️ 起草的 SQL 未确认前不得执行（返工代价高）；字段不确定先探查表结构
 
 ### 方式 C · 混合（推荐复杂分析）—— 触发词：起草 / 骨架 / 生成SQL
 
@@ -60,16 +61,26 @@ NL 诉求 + 起草信号（explore_mode=mixed）
 > 指标已注册 → 走 A（query-metric）正式取数；用户要新建 → 走 D（modeling-etl）。
 > 探索是"未注册口径的先看数据"，不是绕过正式链的常态路径。
 
-## 通用流程（方式 A/B/C 共用）
-1. **找表**：`metadata_search("<主题>")` + `ontology_search` + `ontology_traverse`
-   拿到候选事实表 + 关联维度表 + JOIN 键（不猜表名；贴 SQL 时此步跳过）；
+## 通用流程（方式 A/B/C 共用）——先确认再执行（硬性）
+
+> **核心原则：探索 SQL 是"没指标自己写"，写错了执行就是返工。
+> 除方式 A（用户自己贴的 SQL）外，任何由你起草的 SQL 都必须：
+> 先展示草稿 → 用户确认/编辑 → 才执行。禁止起草后直接执行。**
+
+1. **找表**（OAG 快速版，不做过度检索）：`metadata_search("<主题>")` 一次拿到
+   候选事实表 + 关联维度表即可；不猜表名。**不要**反复调用 metric_disambiguate/
+   ontology_search 逐个排查——指标未注册就直接探索，别在注册检索上绕圈。
 2. **写/取 SQL**：
-   - 方式 A：直接用用户贴的 SQL；
-   - 方式 B/C：LLM 起草后以代码块展示，用户确认或要求修改；
+   - 方式 A：直接用用户贴的 SQL（用户已确认过，可直接执行）；
+   - 方式 B/C：**起草 SQL → 以代码块展示给用户 → `ask_user_question` 请用户
+     确认或指出要改的地方（列/条件/聚合/粒度）→ 用户确认或修改后再进入校验**。
+   - 字段不确定时（如表结构未知），**先探查表结构再起草**：
+     `explore_validate("SELECT * FROM <表> WHERE dt='<某天>' LIMIT 1")` → execute
+     看 columns——避免写出不存在的列（如消费表没有 order_id）。
 3. **校验**：`explore_validate(sql)`——只读 + 表名白名单 + 强制 dt 分区；
-   失败按 errors 修正后重试（最多 3 次）；
-4. **执行观测**：`explore_execute(sql, token)` → 结果集（≤1000 行）；
-   可反复修改重跑（观测迭代，看口径/数据是否符合预期）；
+   失败按 errors 修正后**重新向用户展示修正版 SQL 并再次确认**（最多 3 轮）。
+4. **执行观测**：用户确认的最终 SQL → `explore_execute(sql, token)` → 结果集
+   （≤1000 行）；可反复修改重跑（观测迭代，看口径/数据是否符合预期）。
 5. **固化（P2 桥接）**：观测稳定后 → `explore_promote(sql)` 自动提取口径草稿
    （聚合表达式→候选指标公式、GROUP BY→维度、WHERE→required_filters、
    源表→source_tables；物理列自动反查业务属性）：
@@ -81,7 +92,11 @@ NL 诉求 + 起草信号（explore_mode=mixed）
 - 禁止写库/DDL/任何非 SELECT 语句（explore_execute 已强制）；
 - 禁止把物理表名/字段名作为「注册口径」告知用户（探索结果 = 非注册口径）；
 - 禁止绕过 explore_validate 直接执行（explore_token 已强制绑定）；
-- 禁止在用户未明确同意探索时自动走本路径（默认 query-metric / 结束）。
+- 禁止在用户未明确同意探索时自动走本路径（默认 query-metric / 结束）；
+- **禁止起草后直接执行**：方式 B/C 的 SQL 未经用户确认/编辑，不得进入
+  explore_execute（返工代价高；确认环节同时兜底口径与字段正确性）；
+- **禁止对未注册指标做过度检索**：metric_disambiguate 只在用户疑似想要
+  已注册指标族时用；探索场景确认无注册指标后立即转向找表+写 SQL。
 
 ## 结果展示规范（数据必须用表格，禁止文本罗列）
 

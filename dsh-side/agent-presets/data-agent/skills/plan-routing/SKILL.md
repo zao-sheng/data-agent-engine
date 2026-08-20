@@ -65,11 +65,12 @@ description: 意图识别后的计划与路径选择（Plan Agent）。任何用
   ├─ metrics_missing=false（指标已注册）？
   │    是 → A（load query-metric skill，正常取数）
   │    否 → 明确告知用户：未找到「指标 X / 维度 Y」的注册信息
-  │           ├─ 询问是否新建（ask_user_question）
-  │           │    ├─ 是 → D（load modeling-etl skill，走建模全流程）
-  │           │    └─ 否 → 询问是否先探索性看看数据（ask_user_question）
+  │          ⚠️ 必须先 ask_user_question「是否新建」，禁止跳过该询问直接探索——
+  │          用户可能更想注册为正式指标（走 D），而非临时探索
+  │           ├─ 是 → D（load modeling-etl skill，走建模全流程）
+  │           └─ 否 → 询问是否先探索性看看数据（ask_user_question）
   │           │         ├─ 是 → E（load explore-fallback skill：
-  │           │         │      找表 → 写 SQL(Monaco) → explore_validate
+  │           │         │      找表 → 起草 SQL → 用户确认/编辑 → explore_validate
   │           │         │      → explore_execute → 观测；稳定后回 D 固化）
   │           │         └─ 否 → 结束，不查询不编造
   │           └─（不得自行降级/拼接/臆造未注册的指标或维度）
