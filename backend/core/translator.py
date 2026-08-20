@@ -252,6 +252,9 @@ class Translator:
                 continue
             if perm_rids and not t.get("perm_column"):
                 continue
+            # 状态路由：默认只选 active 表；显式 deprecated 表仅在无替代时兜底
+            if t.get("status") == "deprecated":
+                continue
             direct = needed <= set(t.get("available_dims", []))
             joinable = (t.get("joinable") and bool(needed) and
                         all(self.onto.reachable(owner, self.onto.owner_of(p)) for p in needed))

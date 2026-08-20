@@ -13,8 +13,15 @@ description: OAG 检索增强五步。用户查询数据指标前必须先执行
 - 词典未覆盖的黑话 → 用你的语义理解对照 Ontology 描述推断，**命中候选后在确认环节展示**；
 - **回答回译**：最终回答用词跟随用户（用户说"店铺/poi"就用"店铺"，归一映射仅内部用）。
 
-## Step 1 · 实体识别
+## Step 1 · 实体识别（含业务域路由）
 从**归一后的**用户问题提取业务实体与指标，用 `mcp__dataagent__ontology_search` 逐一确认。
+- **业务域路由**：用户问题明确提到业务域（订单/支付/用户/产品/财务…）时，
+  用 `mcp__dataagent__ontology_search("<实体>", domain="<域代码>")` 按域过滤候选集，
+  避免跨域误命中。域代码：ord=订单域（Order/Payment/Consume/Refund/Store/Region）、
+  usr=用户域（ActiveUser）、prd=产品域（Product）。域不明确时**不带 domain** 全量检索，
+  从返回行「域: xxx」字段判断对象归属。
+- **状态感知**：检索行含治理字段（类型 fact/dim、域、状态、标签）——
+  优先选用 `status: active` 的对象/指标；`deprecated` 的不要用于新查询（翻译引擎也已跳过其表）。
 - 只接受 Ontology 中已注册的对象/指标/属性名（含中文 display_name、别名）
 - 命中多个 → 保留候选列表；零命中 → 触发澄清（不要发明）
 - 指标疑似多口径（GMV 家族）→ 用 `mcp__dataagent__metric_disambiguate` 判定
@@ -29,6 +36,8 @@ description: OAG 检索增强五步。用户查询数据指标前必须先执行
 ## Step 3 · 关系图扩展（核心）
 `mcp__dataagent__ontology_traverse("<事实对象>", 2)` 获取：
 - JOIN 键（join_key）——后续翻译引擎会用，你不要自己猜 JOIN
+- 关系语义（type/cardinality/description）——判断路径业务合理性
+  （如 Refund→Payment 是 refunds 关系，语义为"退款针对一笔支付"）
 - 必要过滤（required_filters，如 is_valid=1）
 - 指标公式（Function definition）
 - 可达维度对象（产品/门店/区域/用户）

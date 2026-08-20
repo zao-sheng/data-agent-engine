@@ -39,18 +39,42 @@ class Ontology:
         self.functions: dict[str, dict] = {}
         self.property_owner: dict[str, str] = {}   # 业务属性 → 归属对象
         self.edges: dict[str, list[tuple[str, str]]] = {}  # source → [(target, join_key)]
+        # 关系语义索引：source → [(target, join_key, type, cardinality, desc)]，
+        # 供 OAG traverse 展示业务语义（翻译引擎仍用 edges 的 join_key）
+        self.relation_meta: dict[str, list[dict]] = {}
 
         self.time_dim: str = cfg.get("time_dimension", "order_date")
         self.partition_col: str = cfg.get("partition_column", "dt")
 
+        # 业务域路由索引：domain → [对象名]（跨域查询按域过滤候选集）
+        self.domain_index: dict[str, list[str]] = {}
+        # 对象类型索引：fact/dim → [对象名]
+        self.object_types: dict[str, list[str]] = {"fact": [], "dim": []}
+
         for o in raw_objects:
-            self.objects[o["name"]] = o
+            name = o["name"]
+            self.objects[name] = o
             for p in o.get("properties", []):
-                self.property_owner[p["name"]] = o["name"]
+                self.property_owner[p["name"]] = name
+            # 域路由：显式 domain 或从表名推断（dwd_<domain>_<subject>_di → domain）
+            dom = o.get("domain") or self._infer_domain(o)
+            o["domain"] = dom
+            self.domain_index.setdefault(dom, []).append(name)
+            # 对象类型：显式 object_type，否则按表层推断（DIM → dim，其余 → fact）
+            otype = o.get("object_type") or ("dim" if o.get("source_tables", [{}])[0].get("layer") == "DIM" else "fact")
+            o["object_type"] = otype
+            self.object_types.setdefault(otype, []).append(name)
         for f in raw_functions:
             self.functions[f["name"]] = f
+            # 指标域：显式 domain，否则跟随归属对象
+            if not f.get("domain"):
+                f["domain"] = self.objects.get(f.get("owner", "") , {}).get("domain", "unknown")
         for r in self.relations:
             self.edges.setdefault(r["source"], []).append((r["target"], r["join_key"]))
+            self.relation_meta.setdefault(r["source"], []).append({
+                "target": r["target"], "join_key": r["join_key"],
+                "type": r.get("type", ""), "cardinality": r.get("cardinality", "N:1"),
+                "description": r.get("description", "")})
 
         # 指标族索引：family -> {variants: [指标名], default: 默认变体}
         self.families: dict[str, dict] = {}
@@ -101,7 +125,7 @@ class Ontology:
         self.dim_aliases: dict[str, str] = {}
         counters: dict[str, int] = {}
         for o in raw_objects:
-            if o.get("source_tables", [{}])[0].get("layer") != "DIM":
+            if o.get("object_type") != "dim":
                 continue
             name = o["name"]
             base = name[0].upper()
@@ -116,19 +140,38 @@ class Ontology:
         for o in raw_objects:
             name = o["name"]
             props = ", ".join(p["name"] for p in o.get("properties", []))
+            otype = o.get("object_type", "fact")
+            status = o.get("status", "active")
+            dom = o.get("domain", "unknown")
             line = (f"[对象] {name}（{o.get('display_name')}）：{o.get('description','')}"
+                    f"；类型: {otype}；域: {dom}；状态: {status}"
+                    f"{'；标签: ' + ','.join(o.get('tags', [])) if o.get('tags') else ''}"
                     f"；属性: {props}")
             for key in {name, o.get("display_name", ""), *o.get("aliases", [])}:
                 if key:
                     self._index_add(str(key).lower(), line)
         for f in raw_functions:
             line = (f"[指标] {f['name']}（{f.get('display_name')}）：{f.get('description','')}"
-                    f"；公式: {f['formula']}；版本: {f.get('version')}")
+                    f"；公式: {f['formula']}；版本: {f.get('version')}"
+                    f"；域: {f.get('domain', 'unknown')}"
+                    f"{'；标签: ' + ','.join(f.get('tags', [])) if f.get('tags') else ''}")
             for key in {f["name"], f.get("display_name", "")}:
                 if key:
                     self._index_add(str(key).lower(), line)
         for p in self.property_owner:
             self._index_add(p.lower(), f"[属性] {p}（归属 {self.owner_of(p)}）")
+
+    def _infer_domain(self, o: dict) -> str:
+        """从 source_tables 物理表名推断业务域：dwd_<domain>_<subject>_di → domain。
+
+        表名规范：{layer}_{domain}_{subject}_{粒度}（如 dwd_ord_order_di → ord）。
+        兜底：单表名取第二段；无表返回 unknown。
+        """
+        for t in o.get("source_tables", []):
+            parts = t.get("table", "").split("_")
+            if len(parts) >= 3 and parts[0].upper() in ("DWD", "DWS", "ADS", "DIM"):
+                return parts[1]
+        return "unknown"
 
     def _index_add(self, key: str, line: str) -> None:
         """往倒排索引添加一条命中（同 key 去重）。"""
@@ -166,6 +209,39 @@ class Ontology:
 
     def all_properties(self) -> list[str]:
         return list(self.property_owner)
+
+    # ── 业务域路由（跨域查询按域过滤候选集）─────────────────
+    def domains(self) -> list[str]:
+        """全部业务域（保持对象声明顺序）。"""
+        return list(self.domain_index)
+
+    def objects_by_domain(self, domain: str) -> list[str]:
+        """某业务域下的对象名（域路由：跨域查询时只取该域候选）。"""
+        return list(self.domain_index.get(domain, []))
+
+    def objects_of_type(self, otype: str) -> list[str]:
+        """某类型（fact/dim）的对象名。"""
+        return list(self.object_types.get(otype, []))
+
+    def domain_of(self, obj_name: str) -> str | None:
+        o = self.objects.get(obj_name)
+        return o.get("domain") if o else None
+
+    def search_by_domain(self, query: str, domain: str | None = None) -> list[str]:
+        """检索（可选按业务域过滤）：返回命中行，域过滤时只留该域对象/指标。"""
+        hits = self.search(query)
+        if not domain:
+            return hits
+        out = []
+        for line in hits:
+            if line.startswith("[指标]"):
+                if f"；域: {domain}；" in line or f"；域: {domain}" == line.rsplit("；", 1)[-1]:
+                    out.append(line)
+            elif line.startswith("[对象]"):
+                # 对象行域信息格式：；类型: ...；域: <domain>；状态:
+                if f"；域: {domain}；" in line:
+                    out.append(line)
+        return out
 
     def resolve_version(self, obj_name: str, hint: str = "") -> str | None:
         """版本解析三级规则：单版本 / default_version / None（需反问，绝不静默选最新）"""

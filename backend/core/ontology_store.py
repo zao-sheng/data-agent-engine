@@ -190,14 +190,16 @@ SUPABASE_TABLES = {
 
 # 每张表插入时的列集合（对齐 PostgREST 批量 upsert 的「所有行键一致」要求）
 SUPABASE_ROW_KEYS = {
-    "ontology_objects": ("name", "display_name", "description", "aliases",
-                         "required_filters", "properties", "source_tables",
+    "ontology_objects": ("name", "display_name", "description", "domain", "object_type",
+                         "status", "data_owner", "tags", "security_level", "update_frequency",
+                         "aliases", "required_filters", "properties", "source_tables",
                          "versions", "default_version"),
     "ontology_functions": ("name", "display_name", "description", "formula", "owner",
+                           "domain", "category", "status", "data_owner", "unit", "tags",
                            "family", "variant_label", "default_of_family",
                            "required_filters", "supported_dimensions",
                            "supported_granularities", "do_not", "version"),
-    "ontology_relations": ("source", "target", "type", "join_key", "cardinality"),
+    "ontology_relations": ("source", "target", "type", "join_key", "cardinality", "description"),
     "ontology_glossary": ("term", "canonical", "type"),
     "ontology_config": ("key", "value"),
 }
@@ -212,7 +214,8 @@ def normalize_rows(rows: list[dict], keys: tuple[str, ...]) -> list[dict]:
     避免触发 23502 not-null / 22P02 类型语法错误。
     """
     jsonb_cols = {"aliases", "required_filters", "properties", "source_tables",
-                  "versions", "supported_dimensions", "supported_granularities"}
+                  "versions", "supported_dimensions", "supported_granularities",
+                  "tags"}
     bool_cols = {"default_of_family"}
     out = []
     for row in rows:
@@ -306,24 +309,33 @@ class SupabaseOntologyStore:
         return r.json()
 
     # ── DB 行 → YAML 形状（与 YAML 文件结构一一对应）─────────
+    # 用 row.get 容忍旧库/测试 mock 缺新列（云端旧表未跑迁移时仍可读）
     @staticmethod
     def _obj_to_yaml(row: dict) -> dict:
-        return {k: row[k] for k in
-                ("name", "display_name", "description", "aliases",
-                 "required_filters", "properties", "source_tables",
+        defs = {"domain": "", "object_type": "fact", "status": "active",
+                "data_owner": "", "tags": [], "security_level": "L2",
+                "update_frequency": "T+1"}
+        return {k: row.get(k, defs.get(k, "")) for k in
+                ("name", "display_name", "description", "domain", "object_type",
+                 "status", "data_owner", "tags", "security_level", "update_frequency",
+                 "aliases", "required_filters", "properties", "source_tables",
                  "versions", "default_version")}
 
     @staticmethod
     def _fn_to_yaml(row: dict) -> dict:
-        return {k: row[k] for k in
+        defs = {"domain": "", "category": "", "status": "active",
+                "data_owner": "", "unit": "", "tags": []}
+        return {k: row.get(k, defs.get(k, "")) for k in
                 ("name", "display_name", "description", "formula", "owner",
+                 "domain", "category", "status", "data_owner", "unit", "tags",
                  "family", "variant_label", "default_of_family",
                  "required_filters", "supported_dimensions",
                  "supported_granularities", "do_not", "version")}
 
     @staticmethod
     def _rel_to_yaml(row: dict) -> dict:
-        return {k: row[k] for k in ("source", "target", "type", "join_key", "cardinality")}
+        return {k: row.get(k, "") for k in ("source", "target", "type", "join_key",
+                                            "cardinality", "description")}
 
     @staticmethod
     def _gloss_to_yaml(row: dict) -> dict:

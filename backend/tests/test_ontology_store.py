@@ -140,5 +140,83 @@ class YamlStoreEdgeTest(unittest.TestCase):
             self.assertEqual(data.config, {})
 
 
+class EnrichedOntologyTest(unittest.TestCase):
+    """本体丰富化（域路由 / 对象类型 / 关系语义 / 状态感知检索）。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.onto = Ontology(ONTOLOGY_DIR)
+
+    def test_domain_index_routes_cross_domain(self):
+        """业务域索引：跨域查询按域过滤候选集。"""
+        self.assertIn("ord", cls := self.onto.domains())
+        self.assertIn("usr", self.onto.domains())
+        # ord 域包含事实与维度对象
+        ord_objs = self.onto.objects_by_domain("ord")
+        self.assertIn("Order", ord_objs)
+        self.assertIn("Payment", ord_objs)
+        self.assertIn("Store", ord_objs)      # 门店维度属 ord
+        self.assertNotIn("ActiveUser", ord_objs)  # 用户维度属 usr
+        self.assertEqual(self.onto.domain_of("Order"), "ord")
+        self.assertEqual(self.onto.domain_of("ActiveUser"), "usr")
+
+    def test_object_type_index(self):
+        """对象类型索引：fact/dim 分离。"""
+        facts = self.onto.objects_of_type("fact")
+        dims = self.onto.objects_of_type("dim")
+        self.assertIn("Order", facts)
+        self.assertIn("Payment", facts)
+        self.assertIn("Product", dims)
+        self.assertIn("Store", dims)
+        self.assertNotIn("Order", dims)
+        self.assertNotIn("Product", facts)
+
+    def test_domain_fallback_inference_from_table_name(self):
+        """缺省 domain 由表名推断（dwd_<domain>_<subject>_di）。"""
+        # 构造无 domain 的对象，验证推断逻辑
+        o = {"name": "X", "source_tables": [{"table": "dwd_mkt_coupon_di"}]}
+        inferred = self.onto._infer_domain(o)
+        self.assertEqual(inferred, "mkt")
+        # 无表 → unknown
+        self.assertEqual(self.onto._infer_domain({"name": "Y"}), "unknown")
+
+    def test_relation_meta_carries_semantics(self):
+        """关系语义索引：type/cardinality/description 供 OAG traverse。"""
+        rels = {r["target"]: r for r in self.onto.relation_meta.get("Order", [])}
+        self.assertEqual(rels["Product"]["type"], "contains")
+        self.assertEqual(rels["Product"]["cardinality"], "N:1")
+        self.assertTrue(rels["Product"]["description"])
+        # 翻译引擎用的 edges 仍保持 (target, join_key) 兼容
+        self.assertIn(("Product", "product_id"), self.onto.edges.get("Order", []))
+
+    def test_search_by_domain_filters(self):
+        """按域检索：只返回该域对象/指标。"""
+        hits = self.onto.search_by_domain("gmv", "ord")
+        self.assertTrue(any("[指标] gmv" in h for h in hits))
+        self.assertTrue(all("域: ord" in h for h in hits))
+        # usr 域没有 gmv 指标
+        hits_usr = self.onto.search_by_domain("gmv", "usr")
+        self.assertFalse(any("[指标] gmv" in h for h in hits_usr))
+        # 无 domain 参数 = 全量检索
+        all_hits = self.onto.search_by_domain("gmv")
+        self.assertGreater(len(all_hits), 0)
+
+    def test_search_index_carries_governance_fields(self):
+        """检索行携带治理字段（类型/域/状态/标签），供 LLM 路由。"""
+        hits = self.onto.search("订单")
+        obj_line = next(h for h in hits if "[对象] Order" in h)
+        self.assertIn("类型: fact", obj_line)
+        self.assertIn("域: ord", obj_line)
+        self.assertIn("状态: active", obj_line)
+        self.assertIn("标签: 核心", obj_line)
+
+    def test_function_domain_follows_owner(self):
+        """指标域跟随归属对象。"""
+        self.assertEqual(self.onto.get_function("gmv")["domain"], "ord")
+        self.assertEqual(self.onto.get_function("gmv")["category"], "规模")
+        self.assertEqual(self.onto.get_function("gmv")["status"], "active")
+        self.assertEqual(self.onto.get_function("gmv")["unit"], "元")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -233,20 +233,25 @@ def _summarize_result(result, tool: str) -> dict:
 
 @mcp.tool()
 @_audit_tool
-def ontology_search(query: str) -> str:
-    """OAG Step1/2：按名称/别名检索业务对象、指标与属性。只返回 Ontology 中已注册的内容，不得发明。"""
-    hits = _onto.search(query)
+def ontology_search(query: str, domain: str | None = None) -> str:
+    """OAG Step1/2：按名称/别名检索业务对象、指标与属性。只返回 Ontology 中已注册的内容，不得发明。
+
+    可选 domain 参数：按业务域过滤候选集（跨域查询按域路由，如 domain="ord" 只返回订单域）。
+    返回行含类型/域/状态/标签，供 LLM 判断对象归属与路由。"""
+    hits = _onto.search_by_domain(query, domain)
     return "\n".join(hits) if hits else f"未命中：{query}（触发模糊匹配 + 澄清，不要编造）"
 
 
 @mcp.tool()
 @_audit_tool
 def ontology_traverse(root: str, max_depth: int = 2) -> str:
-    """OAG Step3：从业务对象出发沿关系图 BFS 扩展，返回 JOIN 键、必要过滤、可达对象。"""
+    """OAG Step3：从业务对象出发沿关系图 BFS 扩展，返回 JOIN 键、关系语义（类型/基数）、可达对象。"""
     if root not in _onto.objects:
         return f"对象 {root} 不存在"
-    lines = [f"[{root}] {_onto.objects[root].get('description','')}",
-             f"  必要过滤: {_onto.objects[root].get('required_filters', [])}"]
+    o = _onto.objects[root]
+    lines = [f"[{root}] {o.get('description','')}",
+             f"  类型: {o.get('object_type','fact')}；域: {o.get('domain','unknown')}；状态: {o.get('status','active')}",
+             f"  必要过滤: {o.get('required_filters', [])}"]
     from collections import deque
     q = deque([(root, 0)])
     seen = {root}
@@ -254,11 +259,14 @@ def ontology_traverse(root: str, max_depth: int = 2) -> str:
         node, depth = q.popleft()
         if depth >= max_depth:
             continue
-        for (nxt, jk) in _onto.edges.get(node, []):
+        for rel in _onto.relation_meta.get(node, []):
+            nxt = rel["target"]
             if nxt in seen:
                 continue
             seen.add(nxt)
-            lines.append(f"  {'  ' * depth}→ {node} --{jk}--> {nxt}")
+            sem = f"{rel['type']}({rel['cardinality']})" if rel.get("type") else "关联"
+            lines.append(f"  {'  ' * depth}→ {node} --{rel['join_key']} [{sem}]--> {nxt}"
+                         + (f"（{rel['description']}）" if rel.get("description") else ""))
             q.append((nxt, depth + 1))
     return "\n".join(lines)
 
@@ -328,6 +336,7 @@ def mql_explain(mql: dict) -> dict:
         metrics.append({"name": name, "display_name": fn["display_name"],
                         "formula": fn["formula"], "version": fn.get("version"),
                         "owner": fn["owner"],
+                        "domain": fn.get("domain", "unknown"),
                         "family": fn.get("family"), "variant_label": fn.get("variant_label")})
     def prop_display(p):
         o = _onto.owner_of(p)
@@ -402,7 +411,10 @@ def metric_disambiguate(query: str) -> dict:
         out["exact"] = {"name": exact["name"], "display_name": exact["display_name"],
                         "formula": exact["formula"], "version": exact.get("version"),
                         "variant_label": exact.get("variant_label"),
-                        "family": exact.get("family")}
+                        "family": exact.get("family"),
+                        "domain": exact.get("domain", "unknown"),
+                        "status": exact.get("status", "active"),
+                        "owner": exact.get("owner", "")}
     if family:
         out["family"] = family
     if status == "none":

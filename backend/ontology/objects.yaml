@@ -1,10 +1,24 @@
 # ============================================================
 # Ontology · 业务对象（order 主题，15 张数仓表）
-# 关键字段说明：
-#   source_tables[].joinable   —— 该表能否 JOIN 维度表扩展维度（仅 DWD 明细表 true）
-#   source_tables[].available_dims —— 该表【直接可用】的业务属性名（不含时间维度 order_date）
-#   source_tables[].pre_aggregated —— {指标名: 物理列}：该列已是该指标的预聚合值
-#   source_tables[].field_mapping  —— 业务属性 → 物理列（order_date → dt 分区列）
+#
+# 顶层字段（对象级治理信息，OAG 检索与域路由使用）：
+#   domain          —— 业务域命名空间（ord=订单域 / usr=用户域 / prd=产品域 / fin=财务域…），
+#                      跨域查询按域路由（ontology_search(domain=…) 过滤候选集）；
+#                      缺省时由表名推断（dwd_<domain>_<subject>_di → <domain>）
+#   object_type     —— fact（事实）| dim（维度）：决定是否参与 JOIN 扩展
+#   status          —— active（在用）| draft（草稿）| deprecated（已废弃，翻译引擎跳过其表）
+#   data_owner      —— 数据责任人（团队/角色），治理归属
+#   tags            —— 治理标签（核心/监管/增长…），OAG 检索展示
+#   security_level  —— 数据敏感度（L1 公开 / L2 内部 / L3 机密），供行级权限增强
+#   update_frequency —— 数据更新频率（T+1 / 小时 / 实时）
+#
+# source_tables[] 每张表可带：
+#   status          —— active（默认）| deprecated：废弃表在表选择时被跳过
+#   description     —— 表业务说明（供元数据检索展示）
+#   joinable        —— 该表能否 JOIN 维度表扩展维度（仅 DWD 明细表 true）
+#   available_dims  —— 该表【直接可用】的业务属性名（不含时间维度 order_date）
+#   pre_aggregated  —— {指标名: 物理列}：该列已是该指标的预聚合值
+#   field_mapping   —— 业务属性 → 物理列（order_date → dt 分区列）
 # 约定：所有事实表时间分区列 = dt（'YYYYMMDD'）；业务日期与 dt 同日。
 # ============================================================
 
@@ -12,6 +26,13 @@ objects:
   # ── 下单域 ────────────────────────────────────────────────
   - name: Order
     display_name: 订单
+    domain: ord
+    object_type: fact
+    status: active
+    data_owner: 交易数据组
+    tags: [核心, 监管]
+    security_level: L2
+    update_frequency: T+1
     aliases: [订单, 下单]
     description: 用户在平台产生的下单行为，统计订单量、下单金额的基础事实
     required_filters: ["is_valid = 1"]
@@ -22,11 +43,13 @@ objects:
       - {name: order_date, type: date, description: 业务日期（分区 dt）}
     source_tables:
       - {table: dwd_ord_order_di, layer: DWD, authority: gold, joinable: true, perm_column: region_id,
+         status: active, description: 下单明细：每行一笔有效/取消订单，含金额与状态,
          granularities: [day, week, month, quarter, year],
          available_dims: [order_status],
          field_mapping: {order_id: order_id, user_id: user_id, order_amount: order_amt,
                          order_status: order_status, order_date: dt}}
       - {table: dws_ord_order_1d, layer: DWS, authority: silver, joinable: false, perm_column: region_id,
+         status: active, description: 订单日汇总：按日+区域+门店聚合下单指标,
          granularities: [day], available_dims: [],
          field_mapping: {order_date: dt},
          pre_aggregated: {order_count: order_cnt, order_amount: order_amt,
@@ -35,6 +58,13 @@ objects:
   # ── 支付域 ────────────────────────────────────────────────
   - name: Payment
     display_name: 支付
+    domain: ord
+    object_type: fact
+    status: active
+    data_owner: 交易数据组
+    tags: [核心, 监管, 财务]
+    security_level: L2
+    update_frequency: T+1
     aliases: [支付]
     description: 用户对订单的支付行为，GMV 与客单价的统计口径来源
     required_filters: ["is_valid = 1"]
@@ -44,19 +74,23 @@ objects:
       - {name: order_date, type: date, description: 支付日期（分区 dt）}
     source_tables:
       - {table: dwd_ord_pay_di, layer: DWD, authority: gold, joinable: true, perm_column: region_id,
+         status: active, description: 支付明细：每行一笔有效支付，GMV 口径来源,
          granularities: [day, week, month, quarter, year],
          available_dims: [channel],
          field_mapping: {pay_id: pay_id, order_id: order_id, user_id: user_id, pay_amount: pay_amt,
                          channel: channel, order_date: dt}}
       - {table: dws_ord_pay_1d, layer: DWS, authority: silver, joinable: false, perm_column: region_id,
+         status: active, description: 支付日汇总：按日+区域+门店聚合支付指标,
          granularities: [day], available_dims: [],
          field_mapping: {order_date: dt},
          pre_aggregated: {gmv: pay_amt, pay_count: pay_cnt, pay_user_cnt: pay_user_cnt}}
       - {table: ads_ord_gmv_1d, layer: ADS, authority: gold, joinable: false,
+         status: active, description: GMV 应用层日汇总：全站 GMV/订单/支付笔数,
          granularities: [day], available_dims: [],
          field_mapping: {order_date: dt},
          pre_aggregated: {gmv: gmv_amt, order_count: order_cnt, refund_amount: refund_amt}}
       - {table: ads_ord_gmv_1m, layer: ADS, authority: gold, joinable: false,
+         status: active, description: GMV 应用层月汇总：按月聚合 GMV,
          granularities: [month], available_dims: [],
          field_mapping: {order_date: dt},
          pre_aggregated: {gmv: gmv_amt, order_count: order_cnt}}
@@ -64,6 +98,13 @@ objects:
   # ── 消费域 ────────────────────────────────────────────────
   - name: Consume
     display_name: 消费
+    domain: ord
+    object_type: fact
+    status: active
+    data_owner: 交易数据组
+    tags: [核心]
+    security_level: L2
+    update_frequency: T+1
     aliases: [消费, 核销]
     description: 用户到店消费/核销行为，统计消费金额的基础事实
     required_filters: ["is_valid = 1"]
@@ -72,10 +113,12 @@ objects:
       - {name: order_date, type: date, description: 消费日期（分区 dt）}
     source_tables:
       - {table: dwd_ord_consume_di, layer: DWD, authority: gold, joinable: true, perm_column: region_id,
+         status: active, description: 消费明细：到店消费/核销记录,
          granularities: [day, week, month, quarter, year],
          available_dims: [],
          field_mapping: {consume_amount: consume_amt, order_date: dt}}
       - {table: dws_ord_consume_1d, layer: DWS, authority: silver, joinable: false, perm_column: region_id,
+         status: active, description: 消费日汇总：按日+区域+门店聚合消费指标,
          granularities: [day], available_dims: [],
          field_mapping: {order_date: dt},
          pre_aggregated: {consume_amount: consume_amt, consume_count: consume_cnt,
@@ -84,6 +127,13 @@ objects:
   # ── 退款域 ────────────────────────────────────────────────
   - name: Refund
     display_name: 退款
+    domain: ord
+    object_type: fact
+    status: active
+    data_owner: 交易数据组
+    tags: [财务, 监管]
+    security_level: L2
+    update_frequency: T+1
     aliases: [退款, 退货]
     description: 用户退款行为，统计退款金额的基础事实（退款表冗余 region_id/store_id）
     required_filters: ["is_valid = 1"]
@@ -92,10 +142,12 @@ objects:
       - {name: order_date, type: date, description: 退款日期（分区 dt）}
     source_tables:
       - {table: dwd_ord_refund_di, layer: DWD, authority: gold, joinable: true, perm_column: region_id,
+         status: active, description: 退款明细：有效退款记录,
          granularities: [day, week, month, quarter, year],
          available_dims: [],
          field_mapping: {refund_amount: refund_amt, order_date: dt}}
       - {table: dws_ord_refund_1d, layer: DWS, authority: silver, joinable: false, perm_column: region_id,
+         status: active, description: 退款日汇总：按日+区域+门店聚合退款指标,
          granularities: [day], available_dims: [],
          field_mapping: {order_date: dt},
          pre_aggregated: {refund_amount: refund_amt, refund_count: refund_cnt}}
@@ -103,6 +155,13 @@ objects:
   # ── 维度对象 ──────────────────────────────────────────────
   - name: Product
     display_name: 产品
+    domain: prd
+    object_type: dim
+    status: active
+    data_owner: 产品数据组
+    tags: [维度]
+    security_level: L1
+    update_frequency: 实时
     aliases: [产品, 商品, goods, item, sku]
     description: 产品维度，含产品类型与品类
     properties:
@@ -110,11 +169,19 @@ objects:
       - {name: category, type: string, description: 品类 如 手机/笔记本}
     source_tables:
       - {table: dim_product, layer: DIM, authority: gold, joinable: false,
+         status: active, description: 产品维度表：产品分类与品类,
          granularities: [], available_dims: [product_type, category],
          field_mapping: {product_type: product_type, category: category}}
 
   - name: Store
     display_name: 门店
+    domain: ord
+    object_type: dim
+    status: active
+    data_owner: 门店数据组
+    tags: [维度]
+    security_level: L1
+    update_frequency: 实时
     aliases: [门店, 店铺, 店面, poi, shop]
     description: 门店维度，含门店类型与城市
     properties:
@@ -122,11 +189,19 @@ objects:
       - {name: city, type: string, aliases: [城市], description: 门店所在城市}
     source_tables:
       - {table: dim_store, layer: DIM, authority: gold, joinable: false,
+         status: active, description: 门店维度表：门店类型与城市归属,
          granularities: [], available_dims: [store_type, city],
          field_mapping: {store_type: store_type, city: city}}
 
   - name: Region
     display_name: 区域
+    domain: ord
+    object_type: dim
+    status: active
+    data_owner: 门店数据组
+    tags: [维度]
+    security_level: L1
+    update_frequency: 实时
     aliases: [区域, 大区]
     description: 区域维度，含区域名/省/城市
     properties:
@@ -134,11 +209,19 @@ objects:
       - {name: province, type: string, description: 省份}
     source_tables:
       - {table: dim_region, layer: DIM, authority: gold, joinable: false,
+         status: active, description: 区域维度表：区域-省份-城市层级,
          granularities: [], available_dims: [region_name, province],
          field_mapping: {region_name: region_name, province: province}}
 
   - name: ActiveUser
     display_name: 活跃用户
+    domain: usr
+    object_type: dim
+    status: active
+    data_owner: 用户数据组
+    tags: [维度, 增长]
+    security_level: L2
+    update_frequency: T+1
     aliases: [活跃用户, 用户, 客户, customer]
     description: 用户维度（dim_user 表）；活跃口径 v2.0=状态为 active 的用户
     default_version: v2.0
@@ -150,5 +233,6 @@ objects:
       - {version: v1.0, effective_from: "2023-01-01", effective_to: "2025-05-31", definition: 近30天有下单的用户, status: deprecated}
     source_tables:
       - {table: dim_user, layer: DIM, authority: gold, joinable: false,
+         status: active, description: 用户维度表：用户状态与等级,
          granularities: [], available_dims: [user_status, user_level],
          field_mapping: {user_status: user_status, user_level: user_level}}

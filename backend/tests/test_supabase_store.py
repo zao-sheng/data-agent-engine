@@ -27,17 +27,20 @@ def _sample_supabase_rows() -> dict[str, list[dict]]:
     objs = []
     for o in y.objects:
         objs.append({k: o.get(k) for k in
-                     ("name", "display_name", "description", "aliases",
-                      "required_filters", "properties", "source_tables",
+                     ("name", "display_name", "description", "domain", "object_type",
+                      "status", "data_owner", "tags", "security_level", "update_frequency",
+                      "aliases", "required_filters", "properties", "source_tables",
                       "versions", "default_version")})
     fns = []
     for f in y.functions:
         fns.append({k: f.get(k) for k in
                     ("name", "display_name", "description", "formula", "owner",
+                     "domain", "category", "status", "data_owner", "unit", "tags",
                      "family", "variant_label", "default_of_family",
                      "required_filters", "supported_dimensions",
                      "supported_granularities", "do_not", "version")})
-    rels = [{k: r.get(k) for k in ("source", "target", "type", "join_key", "cardinality")}
+    rels = [{k: r.get(k) for k in ("source", "target", "type", "join_key",
+                                   "cardinality", "description")}
             for r in y.relations]
     gloss = [{k: g.get(k) for k in ("term", "canonical", "type")} for g in y.glossary]
     cfg = [{"key": k, "value": __import__("json").dumps(v, ensure_ascii=False)}

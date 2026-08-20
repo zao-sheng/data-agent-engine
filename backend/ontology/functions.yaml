@@ -5,6 +5,14 @@
 #     翻译引擎按 AST 编译，禁止自由 SQL 字符串拼接
 #   * owner：指标归属的业务对象（决定事实表候选集）
 #   * pre_aggregated 在 objects.yaml 的 source_tables 里声明（{指标名: 物理列}）
+#
+# 治理字段（OAG 检索与确认环节展示）：
+#   domain     —— 业务域（缺省跟随 owner 对象）
+#   category   —— 指标分类（规模/质量/效率/增长/财务…）
+#   status     —— active | draft | deprecated（废弃指标翻译时不被新查询命中）
+#   data_owner —— 指标责任人（业务方）
+#   unit       —— 指标单位（元/笔/人/次）
+#   tags       —— 治理标签
 # ============================================================
 
 functions:
@@ -14,6 +22,12 @@ functions:
     display_name: GMV（支付口径）
     description: 有效支付金额合计（口径：is_valid=1 的支付单，不含退款冲减）
     owner: Payment
+    domain: ord
+    category: 规模
+    status: active
+    data_owner: 财务分析组
+    unit: 元
+    tags: [核心, 财务, 监管]
     formula: "SUM(pay_amount)"
     required_filters: ["is_valid = 1"]
     default_of_family: true
@@ -28,6 +42,12 @@ functions:
     display_name: GMV（下单口径）
     description: 有效下单金额合计（口径：is_valid=1 的订单，未支付也算）
     owner: Order
+    domain: ord
+    category: 规模
+    status: active
+    data_owner: 交易分析组
+    unit: 元
+    tags: [核心]
     formula: "SUM(order_amount)"
     required_filters: ["is_valid = 1"]
     supported_dimensions: [product_type, category, store_type, city, region_name, province, order_status, order_date]
@@ -41,6 +61,12 @@ functions:
     display_name: GMV（消费口径）
     description: 有效到店消费/核销金额合计
     owner: Consume
+    domain: ord
+    category: 规模
+    status: active
+    data_owner: 交易分析组
+    unit: 元
+    tags: [核心]
     formula: "SUM(consume_amount)"
     required_filters: ["is_valid = 1"]
     supported_dimensions: [product_type, category, store_type, city, region_name, province, order_date]
@@ -52,6 +78,12 @@ functions:
     display_name: 订单量
     description: 有效下单数（去重订单号）
     owner: Order
+    domain: ord
+    category: 规模
+    status: active
+    data_owner: 交易分析组
+    unit: 笔
+    tags: [核心]
     formula: "COUNT(DISTINCT order_id)"
     required_filters: ["is_valid = 1"]
     supported_dimensions: [product_type, category, store_type, city, region_name, province, order_status, order_date]
@@ -63,6 +95,12 @@ functions:
     display_name: 平均客单价
     description: 有效支付金额均值，按订单粒度计算（支付口径）
     owner: Payment
+    domain: ord
+    category: 效率
+    status: active
+    data_owner: 财务分析组
+    unit: 元/单
+    tags: [核心]
     formula: "SUM(pay_amount) / COUNT(DISTINCT order_id)"
     required_filters: ["is_valid = 1"]
     supported_dimensions: [channel, product_type, category, store_type, city, region_name, province, order_date]
@@ -74,6 +112,12 @@ functions:
     display_name: 支付笔数
     description: 有效支付单数
     owner: Payment
+    domain: ord
+    category: 规模
+    status: active
+    data_owner: 交易分析组
+    unit: 笔
+    tags: []
     formula: "COUNT(pay_id)"
     required_filters: ["is_valid = 1"]
     supported_dimensions: [channel, product_type, category, store_type, city, region_name, province, order_date]
@@ -85,6 +129,12 @@ functions:
     display_name: 消费金额
     description: 有效到店消费/核销金额合计
     owner: Consume
+    domain: ord
+    category: 规模
+    status: active
+    data_owner: 交易分析组
+    unit: 元
+    tags: []
     formula: "SUM(consume_amount)"
     required_filters: ["is_valid = 1"]
     supported_dimensions: [product_type, category, store_type, city, region_name, province, order_date]
@@ -96,6 +146,12 @@ functions:
     display_name: 退款金额
     description: 有效退款金额合计
     owner: Refund
+    domain: ord
+    category: 财务
+    status: active
+    data_owner: 财务分析组
+    unit: 元
+    tags: [财务, 监管]
     formula: "SUM(refund_amount)"
     required_filters: ["is_valid = 1"]
     supported_dimensions: [store_type, city, region_name, province, order_date]
@@ -107,6 +163,12 @@ functions:
     display_name: 下单用户数
     description: 有效下单的去重用户数
     owner: Order
+    domain: ord
+    category: 增长
+    status: active
+    data_owner: 用户分析组
+    unit: 人
+    tags: [增长]
     formula: "COUNT(DISTINCT user_id)"
     required_filters: ["is_valid = 1"]
     supported_dimensions: [region_name, store_type, city, order_date]

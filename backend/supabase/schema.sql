@@ -35,13 +35,20 @@ CREATE TABLE IF NOT EXISTS ontology_objects (
   name            TEXT NOT NULL UNIQUE,      -- Order / Payment / ...
   display_name    TEXT NOT NULL DEFAULT '',
   description     TEXT NOT NULL DEFAULT '',
+  domain          TEXT NOT NULL DEFAULT '',  -- 业务域命名空间（ord/usr/prd/fin…）
+  object_type     TEXT NOT NULL DEFAULT 'fact', -- fact | dim
+  status          TEXT NOT NULL DEFAULT 'active', -- active | draft | deprecated
+  data_owner      TEXT NOT NULL DEFAULT '',  -- 数据责任人
+  tags            JSONB NOT NULL DEFAULT '[]',    -- 治理标签
+  security_level  TEXT NOT NULL DEFAULT 'L2', -- L1 公开 / L2 内部 / L3 机密
+  update_frequency TEXT NOT NULL DEFAULT 'T+1',
   aliases         JSONB NOT NULL DEFAULT '[]',       -- ["订单","下单"]
   required_filters JSONB NOT NULL DEFAULT '[]',      -- ["is_valid = 1"]
   properties      JSONB NOT NULL DEFAULT '[]',       -- [{name,type,unit,aliases,description}]
   source_tables   JSONB NOT NULL DEFAULT '[]',       -- [{table,layer,authority,joinable,
                                                     --   perm_column,granularities,
                                                     --   available_dims,field_mapping,
-                                                    --   pre_aggregated}]
+                                                    --   pre_aggregated,status,description}]
   versions        JSONB NOT NULL DEFAULT '[]',       -- [{version,status,effective_from,...}]
   default_version TEXT,
   revision        BIGINT NOT NULL DEFAULT 1,  -- 乐观锁版本号
@@ -55,10 +62,17 @@ COMMENT ON COLUMN ontology_objects.id IS '自增主键';
 COMMENT ON COLUMN ontology_objects.name IS '对象唯一标识（Order/Payment/...），与 Ontology 对象名一致';
 COMMENT ON COLUMN ontology_objects.display_name IS '中文展示名（如「订单」「支付」）';
 COMMENT ON COLUMN ontology_objects.description IS '对象业务描述';
+COMMENT ON COLUMN ontology_objects.domain IS '业务域命名空间（ord 订单/usr 用户/prd 产品/fin 财务…），跨域查询按域路由';
+COMMENT ON COLUMN ontology_objects.object_type IS '对象类型：fact（事实）/ dim（维度）';
+COMMENT ON COLUMN ontology_objects.status IS '生命周期状态：active（在用）/ draft（草稿）/ deprecated（已废弃）';
+COMMENT ON COLUMN ontology_objects.data_owner IS '数据责任人（团队/角色），治理归属';
+COMMENT ON COLUMN ontology_objects.tags IS '治理标签数组（JSONB）：核心/监管/增长/财务…';
+COMMENT ON COLUMN ontology_objects.security_level IS '数据敏感度：L1 公开 / L2 内部 / L3 机密（供行级权限增强）';
+COMMENT ON COLUMN ontology_objects.update_frequency IS '数据更新频率：T+1 / 小时 / 实时';
 COMMENT ON COLUMN ontology_objects.aliases IS '业务别名数组（JSONB），如 ["订单","下单"]，供黑话归一';
 COMMENT ON COLUMN ontology_objects.required_filters IS '必要过滤条件数组（JSONB），如 ["is_valid = 1"]';
 COMMENT ON COLUMN ontology_objects.properties IS '业务属性数组（JSONB）：[{name,type,unit,aliases,description}]';
-COMMENT ON COLUMN ontology_objects.source_tables IS '物理表映射数组（JSONB）：[{table,layer,authority,joinable,perm_column,granularities,available_dims,field_mapping,pre_aggregated}]';
+COMMENT ON COLUMN ontology_objects.source_tables IS '物理表映射数组（JSONB）：[{table,layer,authority,joinable,perm_column,granularities,available_dims,field_mapping,pre_aggregated,status,description}]';
 COMMENT ON COLUMN ontology_objects.versions IS '对象版本历史（JSONB）：[{version,status,effective_from,...}]';
 COMMENT ON COLUMN ontology_objects.default_version IS '默认生效版本（多版本时指定；无则需反问）';
 COMMENT ON COLUMN ontology_objects.revision IS '乐观锁版本号：每次更新 +1，写入时校验防多人覆盖';
@@ -79,6 +93,12 @@ CREATE TABLE IF NOT EXISTS ontology_functions (
   description  TEXT NOT NULL DEFAULT '',
   formula      TEXT NOT NULL,
   owner        TEXT NOT NULL,                -- 归属对象名（ontology_objects.name）
+  domain       TEXT NOT NULL DEFAULT '',     -- 业务域（缺省跟随 owner 对象）
+  category     TEXT NOT NULL DEFAULT '',     -- 指标分类（规模/质量/效率/增长/财务…）
+  status       TEXT NOT NULL DEFAULT 'active', -- active | draft | deprecated
+  data_owner   TEXT NOT NULL DEFAULT '',     -- 指标责任人（业务方）
+  unit         TEXT NOT NULL DEFAULT '',     -- 指标单位（元/笔/人/次）
+  tags         JSONB NOT NULL DEFAULT '[]',  -- 治理标签
   family       TEXT,
   variant_label TEXT,
   default_of_family BOOLEAN NOT NULL DEFAULT FALSE,
@@ -100,6 +120,12 @@ COMMENT ON COLUMN ontology_functions.display_name IS '指标展示名（如「GM
 COMMENT ON COLUMN ontology_functions.description IS '指标口径描述';
 COMMENT ON COLUMN ontology_functions.formula IS '指标公式（白名单函数：SUM/COUNT/AVG/MAX/MIN/DISTINCT + 属性名）';
 COMMENT ON COLUMN ontology_functions.owner IS '归属业务对象名（引用 ontology_objects.name）';
+COMMENT ON COLUMN ontology_functions.domain IS '业务域（缺省跟随 owner 对象），供跨域检索路由';
+COMMENT ON COLUMN ontology_functions.category IS '指标分类（规模/质量/效率/增长/财务…）';
+COMMENT ON COLUMN ontology_functions.status IS '生命周期状态：active/draft/deprecated';
+COMMENT ON COLUMN ontology_functions.data_owner IS '指标责任人（业务方）';
+COMMENT ON COLUMN ontology_functions.unit IS '指标单位（元/笔/人/次）';
+COMMENT ON COLUMN ontology_functions.tags IS '治理标签数组（JSONB）';
 COMMENT ON COLUMN ontology_functions.family IS '指标族名（如 gmv 族：支付/下单/消费三种口径）';
 COMMENT ON COLUMN ontology_functions.variant_label IS '族内变体标签（如「支付口径」）';
 COMMENT ON COLUMN ontology_functions.default_of_family IS '是否为族默认口径（取数只说族名时用默认）';
@@ -125,6 +151,7 @@ CREATE TABLE IF NOT EXISTS ontology_relations (
   type         TEXT NOT NULL DEFAULT '',
   join_key     TEXT NOT NULL,
   cardinality  TEXT NOT NULL DEFAULT 'N:1',
+  description  TEXT NOT NULL DEFAULT '',     -- 关系业务语义说明
   revision     BIGINT NOT NULL DEFAULT 1,
   is_deleted   BOOLEAN NOT NULL DEFAULT FALSE,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -139,6 +166,7 @@ COMMENT ON COLUMN ontology_relations.target IS '目标对象名（引用 ontolog
 COMMENT ON COLUMN ontology_relations.type IS '关系类型（contains/fulfills/belongs_to/refunds...）';
 COMMENT ON COLUMN ontology_relations.join_key IS 'JOIN 键（物理列名，如 store_id/region_id）';
 COMMENT ON COLUMN ontology_relations.cardinality IS '基数（N:1 / 1:N / 1:1）';
+COMMENT ON COLUMN ontology_relations.description IS '关系业务语义说明（OAG traverse 展示，供路径合理性判断）';
 COMMENT ON COLUMN ontology_relations.revision IS '乐观锁版本号';
 COMMENT ON COLUMN ontology_relations.is_deleted IS '软删除标记';
 COMMENT ON COLUMN ontology_relations.created_at IS '创建时间';
