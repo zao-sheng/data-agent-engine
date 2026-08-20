@@ -61,32 +61,44 @@ description: 意图识别后的计划与路径选择（Plan Agent）。任何用
 ## Step 2 · 取数子流程（关键分支：缺指标维度 → 询问是否新建）
 
 ```
-取数意图（intent=query）
+取数意图（intent=query 或 explore）
   ├─ metrics_missing=false（指标已注册）？
   │    是 → A（load query-metric skill，正常取数）
   │    否 → 明确告知用户：未找到「指标 X / 维度 Y」的注册信息
   │           ├─ 询问是否新建（ask_user_question）
   │           │    ├─ 是 → D（load modeling-etl skill，走建模全流程）
-  │           │    └─ 否 → 结束，不查询不编造
+  │           │    └─ 否 → 询问是否先探索性看看数据（ask_user_question）
+  │           │         ├─ 是 → E（load explore-fallback skill：
+  │           │         │      找表 → 写 SQL(Monaco) → explore_validate
+  │           │         │      → explore_execute → 观测；稳定后回 D 固化）
+  │           │         └─ 否 → 结束，不查询不编造
   │           └─（不得自行降级/拼接/臆造未注册的指标或维度）
+  └─ intent=explore（探索信号命中）→ 直接走 E（explore-fallback），
+     用户可随时改选：NL / 纯 SQL（Monaco）/ 混合三模式
 ```
+
+> 探索意图信号：`intent_classify` 返回 `intent=explore`（"先看看/大概/探索/摸底/
+> 试试看"等 + 指标未命中）→ 路径 E。这是「未注册口径的先看数据」，不是常态取数。
 
 ## Step 3 · 选择执行路径（确定性规则，按序判定）
 
 ```
 ① intent=query？
      → 指标+维度齐全 → A（query-metric）
-     → 缺失 → 询问是否新建 → 是走 D / 否结束
-② intent=metadata？
+     → 缺失 → 询问是否新建 → 是走 D / 否→询问是否探索 → 是走 E / 否结束
+② intent=explore？（探索信号命中，如"先看看XX数据"）
+     → E（explore-fallback）：找表 → 写 SQL(Monaco) → explore_validate
+       → explore_execute → 观测；稳定后告知可走 D 固化
+③ intent=metadata？
      → metadata_search（+ ontology_search/traverse 补充解读）
      → mixed 含 query → 先答口径，再询问是否取数
-③ intent=modeling？
+④ intent=modeling？
      → D（modeling-etl → modeling-workflow）
      → ⚠️ 进入 D 后【第一步】必须先输出完整的需求识别清单（编号表格），
        再一次性 ask_user_question 整体确认——不得先逐项追问
-④ intent=operation（改 ETL/调度等）？
+⑤ intent=operation（改 ETL/调度等）？
      → 直接调用对应 MCP，遵守工具约束与审批；涉及口径变更仍需用户确认
-⑤ intent=unclear 或证据冲突？
+⑥ intent=unclear 或证据冲突？
      → 向用户澄清意图，不臆断；不得猜测路径继续走
 ```
 

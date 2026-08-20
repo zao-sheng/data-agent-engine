@@ -59,12 +59,22 @@ OPERATION_WORDS = [
 # ── 存量提及信号（obj_sig）：ETL/调度/任务/配置 等运维对象 ────────────
 OPERATION_OBJECTS = ["etl", "调度", "任务", "配置"]
 
+# ── 探索信号（explore）：指标未注册时的探索性取数诉求 ────────────────
+# 与 QUERY_WORDS 的区别：不含明确数值词（"多少/排名"），而是"先看看数据/
+# 大概了解/试试"这类探索性表述。命中后（且指标缺失）→ 路径 E（explore）。
+EXPLORE_WORDS = [
+    "先看看", "看看数据", "大概看看", "探索", "探索一下", "试试看", "试一下",
+    "随便看看", "有哪些数据", "数据长什么样", "先了解", "摸底", "探一下",
+    "粗略", "大概", "初步看", "看下趋势", "看看趋势",
+]
+
 # 意图 → 路径（与 plan-routing 的路径命名一致）
 PATH_BY_INTENT = {
     "query": "A",          # 取数 → query-metric
     "metadata": "metadata",  # 元数据咨询 → metadata_search
     "modeling": "D",       # 新建/建模 → modeling-etl → modeling-workflow
     "operation": "direct", # 其他操作 → 直接调用对应 MCP
+    "explore": "E",        # 探索性取数 → explore-fallback（找表→SQL→观测）
     "unclear": "clarify",  # 低置信 → 澄清，不猜
 }
 
@@ -126,6 +136,7 @@ def classify_intent(onto: Ontology, text: str) -> dict:
     mv = _substring_hits(METADATA_WORDS, low)
     modv = _substring_hits(MODELING_WORDS, low)
     opv = _substring_hits(OPERATION_WORDS, low)
+    ev = _substring_hits(EXPLORE_WORDS, low)
     obj_sig = bool(metric_hits or object_hits or _substring_hits(OPERATION_OBJECTS, low))
 
     evidence: list[dict] = []
@@ -141,6 +152,8 @@ def classify_intent(onto: Ontology, text: str) -> dict:
         evidence.append({"type": "modeling_word", "value": w, "signal": "modeling"})
     for w in opv:
         evidence.append({"type": "operation_word", "value": w, "signal": "operation"})
+    for w in ev:
+        evidence.append({"type": "explore_word", "value": w, "signal": "explore"})
 
     mixed: list[dict] = []
     intent: str
@@ -150,7 +163,12 @@ def classify_intent(onto: Ontology, text: str) -> dict:
     if modv:
         intent = "modeling"
         note = "新建/建模意图：走路径 D（modeling-etl → modeling-workflow），先输出需求清单再整体确认"
-    # ② 存量操作（修改类动词 + 存量提及，防止裸"改"误判）
+    # ② 探索（探索信号 + 指标缺失：未注册指标的探索性取数）
+    elif ev and not metric_hits:
+        intent = "explore"
+        note = ("探索意图：指标未注册，走探索路径 E（explore-fallback）——找表 → 写 SQL → "
+                "受控执行观测；探索结果稳定后可走路径 D 固化注册")
+    # ③ 存量操作（修改类动词 + 存量提及，防止裸"改"误判）
     elif opv and obj_sig:
         intent = "operation"
         note = "存量操作：直接调用对应 MCP 工具（etl_generate / scheduler_submit 等），涉及口径变更仍需用户确认"
@@ -189,7 +207,7 @@ def classify_intent(onto: Ontology, text: str) -> dict:
         confidence = "low"
 
     missing_metrics: list[str] = []
-    metrics_missing = intent == "query" and not metric_hits
+    metrics_missing = intent in ("query", "explore") and not metric_hits
     if metrics_missing:
         missing_metrics = sorted(onto.functions)
 

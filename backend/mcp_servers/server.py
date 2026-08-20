@@ -49,6 +49,8 @@ from core.confirm_token import ConfirmTokenStore  # noqa: E402
 from core.ddl_gen import generate_ddl  # noqa: E402
 from core.etl_gen import generate_etl  # noqa: E402
 from core.entry_validator import EntryValidationError, validate_entry  # noqa: E402
+from core.explore import (
+    candidate_tables, extract_tables, validate_explore_sql)  # noqa: E402
 from core.intent import classify_intent  # noqa: E402
 from core.metadata import MetadataService  # noqa: E402
 from core.modeling_plan import generate_modeling_plan  # noqa: E402
@@ -144,6 +146,10 @@ _token_store = QueryTokenStore(ttl_seconds=CONFIG.query_token_ttl,
 # 确认令牌存储（P4-14）：mql_explain 签发 → semantic_translate 强制携带
 _confirm_store = ConfirmTokenStore(ttl_seconds=CONFIG.confirm_token_ttl,
                                    max_tokens=CONFIG.confirm_token_max)
+
+# 探索令牌存储（P0/P1）：explore_validate 签发 → explore_execute 校验
+# 独立于 query_token 链（探索 SQL 未走翻译引擎），但同样绑定 SQL 指纹
+_explore_store = QueryTokenStore(ttl_seconds=120, max_tokens=100)
 
 # 审计日志（P0-3）：jsonl + 轮转
 setup_audit_logger(CONFIG.log_dir, max_bytes=CONFIG.audit_max_bytes,
@@ -604,6 +610,52 @@ def scheduler_submit(task_spec: dict) -> dict:
     接入后在此补充核心逻辑：任务依赖、调度周期（cron）、告警通道、幂等键。"""
     return {"error": "调度配置未接入平台 MCP（预留）。"
                      "接入 mcp-scheduler 后：提交任务依赖/周期/告警，带幂等键。"}
+
+
+@mcp.tool()
+@_audit_tool
+def explore_validate(sql: str) -> dict:
+    """探索取数（P0/P1）：校验探索 SQL（表名白名单/只读/强制分区）。
+
+    适用：指标未注册的探索性分析（用户明确走探索路径时）。
+    校验通过返回 explore_token（绑定 SQL 指纹，120s 有效）——
+    explore_execute 必须携带。探索通道与正式取数（query_token 链）物理隔离，
+    但只读护栏（禁写/禁 DDL/行数上限）完全一致。
+
+    表名白名单：SQL 引用的物理表必须已注册（来自 metadata_search /
+    ontology_search / ontology_traverse 返回值），防编造表名。
+    前端集成：纯 SQL 模式（Monaco + dt-sql-parser 编辑）提交后先调本工具。"""
+    allowed = candidate_tables(_onto)
+    result = validate_explore_sql(sql, allowed)
+    if not result["ok"]:
+        return {"ok": False, "errors": result["errors"],
+                "tables": result["tables"],
+                "hint": "仅支持已注册表；必须带 dt 分区条件；只读 SELECT/CTE"}
+    result["ok"] = True
+    result["explore_token"] = _explore_store.issue(sql)
+    result["note"] = "探索路径生成（非注册口径），建议人工核对后使用"
+    return result
+
+
+@mcp.tool()
+@_audit_tool
+def explore_execute(sql: str, explore_token: str) -> dict:
+    """探索取数（P0/P1）：执行已校验的探索 SQL（只读，行数上限 1000）。
+
+    必须携带 explore_validate 返回的 explore_token（绑定 SQL 指纹，
+    防绕过校验直接执行任意 SQL）。执行走 Executor 只读护栏
+    （FORBIDDEN 正则 + SQLite mode=ro + MAX_ROWS）。
+
+    返回结果集 + 探索标记；结果仅供观测，未固化为注册口径。"""
+    ok, reason = _explore_store.verify(explore_token, sql)
+    if not ok:
+        return {"error": reason}
+    result = _executor.execute(sql)
+    if "error" in result:
+        return result
+    result["explore"] = True
+    result["note"] = "探索路径结果（非注册口径），观测后稳定可走路径 D 固化注册"
+    return result
 
 
 if __name__ == "__main__":
