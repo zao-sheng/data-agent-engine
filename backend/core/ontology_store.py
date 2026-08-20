@@ -400,6 +400,27 @@ class SupabaseOntologyWriter:
             self._upsert_row(table, row, user)
         return len(rows)
 
+    def soft_delete(self, table: str, conflict_key: str, key_value: str,
+                    user: str = "") -> None:
+        """软删除一行（is_deleted=true，评审可见可恢复）。
+
+        多人编辑语义：删除不物理移除，标 is_deleted 让读路径过滤、
+        管理端仍可审计。objects 按 name、tables 按 table_name 等。
+        """
+        url = (f"{self.url}/rest/v1/{table}"
+               f"?{conflict_key}=eq.{key_value}&is_deleted=eq.false")
+        req = urllib.request.Request(
+            url, data=json.dumps({"is_deleted": True, "updated_by": user}).encode(),
+            method="PATCH", headers={**self._headers(), "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                if resp.status not in (200, 204):
+                    raise RuntimeError(f"软删除 {table} 失败: HTTP {resp.status}")
+        except urllib.error.HTTPError as e:
+            if e.code == 404:  # 已不存在（可能已软删）→ 幂等成功
+                return
+            raise
+
     def upsert_object(self, obj: dict, user: str = "") -> None:
         self._upsert_row("ontology_objects", obj, user)
 

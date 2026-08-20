@@ -174,6 +174,29 @@ class SupabaseWriterTest(unittest.TestCase):
         self.assertEqual(mock_urlopen.call_count, 2)
 
     @mock.patch("core.ontology_store.urllib.request.urlopen")
+    def test_soft_delete_payload(self, mock_urlopen):
+        """软删除：PATCH is_deleted=true，按主键过滤，带 updated_by。"""
+        resp = mock.Mock()
+        resp.status = 204
+        mock_urlopen.return_value.__enter__.return_value = resp
+        self.w.soft_delete("ontology_objects", "name", "Survey", user="cleanup")
+        req = mock_urlopen.call_args.args[0]
+        self.assertEqual(req.method, "PATCH")
+        self.assertIn("name=eq.Survey", req.full_url)
+        self.assertIn("is_deleted=eq.false", req.full_url)
+        import json
+        payload = json.loads(req.data.decode())
+        self.assertTrue(payload["is_deleted"])
+        self.assertEqual(payload["updated_by"], "cleanup")
+
+    @mock.patch("core.ontology_store.urllib.request.urlopen")
+    def test_soft_delete_already_gone_idempotent(self, mock_urlopen):
+        """软删除已不存在的行（HTTP 404）→ 幂等成功不报错。"""
+        from urllib.error import HTTPError
+        mock_urlopen.side_effect = HTTPError("", 404, "not found", None, None)
+        self.w.soft_delete("ontology_objects", "name", "Ghost")  # 不抛异常
+
+    @mock.patch("core.ontology_store.urllib.request.urlopen")
     def test_update_object_revision_conflict(self, mock_urlopen):
         """PATCH 命中 0 行（204）→ 冲突。"""
         from urllib.error import HTTPError
