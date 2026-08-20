@@ -57,6 +57,18 @@ class DdlGenTest(unittest.TestCase):
         self.assertIn("dim_ord_store", ddl)
         self.assertNotIn("PARTITIONED BY", ddl)
 
+    def test_ddl_domain_defaults_to_object_domain(self):
+        """domain 缺省取对象自身业务域（本体治理字段，非硬编码 ord）。"""
+        # Product 域 = prd（维度表命名 dim_prd_product）
+        r = generate_ddl(self.onto, "Product", "DIM")
+        self.assertNotIn("error", r)
+        self.assertEqual(r["domain"], "prd")
+        self.assertEqual(r["table"], "dim_prd_product")
+        self.assertIn("dim_prd_product", r["ddl"])
+        # Order 域 = ord（显式传 domain 仍覆盖）
+        r2 = generate_ddl(self.onto, "Order", "DWS", domain="fin", subject="order")
+        self.assertEqual(r2["table"], "dws_fin_order_1d")
+
     def test_ddl_unknown_object(self):
         r = generate_ddl(self.onto, "NotExist", "DWD")
         self.assertIn("error", r)
@@ -79,6 +91,17 @@ class EtlGenTest(unittest.TestCase):
         self.assertIn("GROUP BY F.dt", etl)
         self.assertEqual(r["engine"], "spark")
         self.assertTrue(r["review_required"])
+
+    def test_etl_domain_defaults_to_object_domain(self):
+        """ETL domain 缺省取对象域；deprecated 源表被跳过。"""
+        r = generate_etl(self.onto, "Payment", "ADS", subject="gmv", metrics=["gmv"])
+        self.assertNotIn("error", r)
+        self.assertEqual(r["target"], "ads_ord_gmv_1d")
+        # 显式传 domain 覆盖
+        r2 = generate_etl(self.onto, "Order", "DWS", domain="fin", subject="order",
+                          metrics=["order_count"])
+        self.assertNotIn("error", r2)
+        self.assertEqual(r2["target"], "dws_fin_order_1d")
 
     def test_etl_with_dimension(self):
         r = generate_etl(self.onto, "Payment", "DWS", subject="pay",

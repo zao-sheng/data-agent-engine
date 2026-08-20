@@ -54,7 +54,9 @@ def generate_modeling_plan(onto: Ontology, changes: list[dict]) -> dict:
         ctype = c["type"]
         obj = c["obj_name"]
         layer = c.get("layer")
-        domain = c.get("domain", "ord")
+        # domain 缺省取对象自身业务域（本体治理字段），跨域新建可显式传 domain
+        obj_meta = onto.get_object(obj) or {}
+        domain = c.get("domain") or obj_meta.get("domain") or "ord"
         subject = c.get("subject")
         metrics = c.get("metrics")
         dimensions = c.get("dimensions")

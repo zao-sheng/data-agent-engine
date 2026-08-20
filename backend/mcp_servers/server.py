@@ -462,25 +462,27 @@ def metadata_search(query: str) -> dict:
 
 @mcp.tool()
 @_audit_tool
-def ddl_generate(obj_name: str, layer: str, domain: str = "ord",
+def ddl_generate(obj_name: str, layer: str, domain: str | None = None,
                  subject: str = None) -> dict:
     """路径 D（ETL）：从 Ontology 对象生成建表 DDL 草稿（Spark SQL，Hive 风格）。
     严格遵守数仓分层命名规范：表名 = {layer}_{domain}_{subject}_{粒度后缀}
     （后缀：明细 _di、日汇总 _1d、月汇总 _1m）；事实表统一 dt 分区。
+    domain 缺省取对象自身业务域（本体治理字段）；跨域新建可显式传 domain。
     口径/类型以 Ontology 为准，生成后需人工 Review + 走审批。"""
     return generate_ddl(_onto, obj_name, layer, domain=domain, subject=subject)
 
 
 @mcp.tool()
 @_audit_tool
-def etl_generate(obj_name: str, layer: str, domain: str = "ord",
+def etl_generate(obj_name: str, layer: str, domain: str | None = None,
                  subject: str = None,
                  metrics: list[str] = None,
                  dimensions: list[str] = None) -> dict:
     """路径 D（ETL）：从 Ontology 生成 Spark SQL ETL 管道草稿
     （INSERT OVERWRITE 聚合，源=DWD 明细 → 目标=汇总/应用表）。
     指标公式/required_filter/维度映射以 Ontology 为准，跨域指标自动 CTE 合并
-    （与翻译引擎多指标策略一致）。生成后需人工 Review + 走审批。"""
+    （与翻译引擎多指标策略一致）。domain 缺省取对象自身业务域。
+    生成后需人工 Review + 走审批。"""
     return generate_etl(_onto, obj_name, layer, domain=domain, subject=subject,
                         metrics=metrics, dimensions=dimensions)
 

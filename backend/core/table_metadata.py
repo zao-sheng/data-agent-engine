@@ -148,10 +148,12 @@ def _collect_one(db: Path | str, onto: Ontology, t: str,
                 })
 
     partition_col = "dt" if layer != "DIM" else ""
+    # 业务域：entry（注册对象）显式 domain 优先，其次表名推断，兜底 ord
+    obj_domain = (entry or {}).get("domain")
     return {
         "table_name": t,
         "layer": layer,
-        "domain": domain or "ord",
+        "domain": obj_domain or domain or "ord",
         "subject": subject or "",
         "description": TABLE_DESC.get(t, ""),
         "granularity": _granularity_of(t, layer),

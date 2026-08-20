@@ -104,6 +104,8 @@ description: 建模全流程规范（路径 D）。从需求文档提取建模�
 配对的 DDL+ETL 列表：
 1. **变更清单 → modeling_plan**：把方案书第 3 节的每个变更逐项传入
    `{type, obj_name, layer, domain, subject, metrics, dimensions}`。
+   `domain` 缺省取对象自身业务域（本体治理字段，如 ord/prd/usr）——
+   跨域新建才需显式传 domain。
 2. **配对校验**：工具返回的 `summary.paired` 必须为 True——新增/加字段事实表
    **必须 DDL 与 ETL 成对**（N 张表 → N 对）；`errors` 非空时先解决再继续。
    > 严禁分开发 ddl_generate / etl_generate 造成数量不对应（2 个 DDL 配 1 个 ETL）。

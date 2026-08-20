@@ -38,17 +38,20 @@ def table_name(layer: str, domain: str, subject: str) -> str:
     return f"{layer.lower()}_{domain}_{subject}{suffix}"
 
 
-def generate_ddl(onto: Ontology, obj_name: str, layer: str, domain: str = "ord",
+def generate_ddl(onto: Ontology, obj_name: str, layer: str, domain: str | None = None,
                  subject: str | None = None) -> dict:
     """从 Ontology 对象生成 Spark SQL 建表草稿。
 
     返回 {table, layer, domain, subject, ddl, review_required}；
     生成后需人工 Review + 审批（路径 D 阶段 3）。
+    domain 缺省取对象自身的业务域（o.domain，如 ord/prd/usr）——
+    与本体治理字段对齐，不再硬编码 ord。
     """
     o = onto.get_object(obj_name)
     if not o:
         return {"error": f"对象 {obj_name} 不存在"}
     layer = layer.upper()
+    domain = domain or o.get("domain") or "ord"
     subject = subject or obj_name.lower()
     table = table_name(layer, domain, subject)
 

@@ -45,7 +45,7 @@ def _required_filters(onto: Ontology, fn: dict) -> list[str]:
     return [f for f in fn.get("required_filters", [])]
 
 
-def generate_etl(onto: Ontology, obj_name: str, layer: str, domain: str = "ord",
+def generate_etl(onto: Ontology, obj_name: str, layer: str, domain: str | None = None,
                  subject: str | None = None,
                  metrics: list[str] | None = None,
                  dimensions: list[str] | None = None) -> dict:
@@ -55,19 +55,23 @@ def generate_etl(onto: Ontology, obj_name: str, layer: str, domain: str = "ord",
     layer/domain/subject: 目标表 {layer}_{domain}_{subject}{后缀}
     metrics: 指标名列表（Ontology functions 中已注册；缺省取目标对象全部指标）
     dimensions: 分组维度（业务属性名，须在源表 available_dims 或可 JOIN）
+    domain 缺省取对象自身业务域（与本体治理字段对齐，不再硬编码 ord）。
     """
     o = onto.get_object(obj_name)
     if not o:
         return {"error": f"对象 {obj_name} 不存在"}
     layer = layer.upper()
+    domain = domain or o.get("domain") or "ord"
     subject = subject or obj_name.lower()
     target = table_name(layer, domain, subject)
 
-    # 源表：目标对象同 owner 的 DWD 明细表（ETL 聚合语义要求源为明细）
+    # 源表：目标对象同 owner 的 DWD 明细表（ETL 聚合语义要求源为明细）；
+    # 跳过 status=deprecated 的废弃表（与翻译引擎表选择一致）
     source_tables = o.get("source_tables", [])
-    detail = [t for t in source_tables if t.get("layer") == "DWD"]
+    detail = [t for t in source_tables
+              if t.get("layer") == "DWD" and t.get("status") != "deprecated"]
     if not detail:
-        return {"error": f"对象 {obj_name} 没有 DWD 明细源表，无法生成 ETL（需先建明细表）"}
+        return {"error": f"对象 {obj_name} 没有可用的 DWD 明细源表（或全部已废弃），无法生成 ETL（需先建明细表）"}
     src = detail[0]
     src_table = src["table"]
     field_map = src.get("field_mapping", {})
