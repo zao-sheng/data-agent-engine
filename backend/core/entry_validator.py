@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .mql_schema import GRANULARITIES
+from .mql_schema import FORMULA_FNS, GRANULARITIES, IDENT_RE
 
 # ── 枚举/取值域（与 schema.sql COMMENT 一致）─────────────────
 OBJECT_TYPES = {"fact", "dim"}
@@ -126,10 +126,26 @@ def _validate_function(entry: dict, mode: str = "create") -> None:
     for f in ("family", "variant_label", "do_not"):
         if f in entry and entry[f] is not None:
             _expect_type(entry, f, "字符串", lambda v: isinstance(v, str), required=False)
-    # formula 白名单：仅白名单函数 + 属性名（不做深度 AST，只拦明显非法）
+    # formula 白名单：仅白名单函数（SUM/COUNT/AVG/MAX/MIN/DISTINCT）+ 属性名
+    # 简单校验：剥离函数调用后的标识符 token 必须都是白名单函数或小写属性名。
+    # （深度 AST 校验由翻译引擎 _compile_formula 执行，这里拦截明显非法值。）
     formula = entry.get("formula", "")
-    if formula is not None and not (isinstance(formula, str) and formula.strip()):
+    if formula is None:
+        if mode == "create":
+            raise EntryValidationError("字段 formula 缺失或为空（必填）")
+    elif not (isinstance(formula, str) and formula.strip()):
         raise EntryValidationError("字段 formula 缺失或为空（必填）")
+    elif isinstance(formula, str):
+        import re as _re
+        tokens = _re.findall(IDENT_RE, formula)
+        for tok in tokens:
+            if tok.upper() in FORMULA_FNS:
+                continue
+            if tok == tok.lower():  # 属性名（小写）放行，交由翻译引擎做存在性校验
+                continue
+            raise EntryValidationError(
+                f"字段 formula 含非法标识符 {tok!r}：仅允许白名单函数 "
+                f"{sorted(FORMULA_FNS)} + 属性名")
     # owner 归属对象存在性：由调用方（有 Ontology 上下文）校验
 
 

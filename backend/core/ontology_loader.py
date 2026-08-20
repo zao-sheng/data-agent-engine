@@ -161,15 +161,16 @@ class Ontology:
             self._index_add(p.lower(), f"[属性] {p}（归属 {self.owner_of(p)}）")
 
     def _infer_domain(self, o: dict) -> str:
-        """从 source_tables 物理表名推断业务域：dwd_<domain>_<subject>_di → domain。
+        """从 source_tables 物理表名推断业务域（复用 table_naming 解析）。
 
         表名规范：{layer}_{domain}_{subject}_{粒度}（如 dwd_ord_order_di → ord）。
-        兜底：单表名取第二段；无表返回 unknown。
+        取首个有规范前缀的表；无表返回 unknown。
         """
+        from .table_naming import domain_of_table
         for t in o.get("source_tables", []):
-            parts = t.get("table", "").split("_")
-            if len(parts) >= 3 and parts[0].upper() in ("DWD", "DWS", "ADS", "DIM"):
-                return parts[1]
+            dom = domain_of_table(t.get("table", ""))
+            if dom:
+                return dom
         return "unknown"
 
     def _index_add(self, key: str, line: str) -> None:

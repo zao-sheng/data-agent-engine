@@ -72,10 +72,6 @@ TABLE_DESC: dict[str, str] = {
 }
 
 
-def _layer_of(table: str) -> str:
-    return table.split("_")[0].upper()
-
-
 def _granularity_of(table: str, layer: str) -> str:
     if layer == "DIM":
         return "维度"
@@ -92,11 +88,9 @@ def _collect_one(db: Path | str, onto: Ontology, t: str,
 
     entry: 可选——注册中的对象 dict（新表未建时从中取 field_mapping+properties）。
     """
-    layer = _layer_of(t)
-    parts = t.split("_")
-    domain = parts[1] if len(parts) > 1 and layer != "DIM" else (
-        parts[1] if len(parts) > 1 else "")
-    subject = parts[2] if len(parts) > 2 else (parts[1] if len(parts) > 1 else "")
+    # 表名解析（layer/domain/subject）复用 table_naming 单点规范
+    from .table_naming import parse_table_name
+    layer, domain, subject = parse_table_name(t)
 
     # 字段：样例库 PRAGMA 优先；表不存在时从对象属性推导
     fields = []

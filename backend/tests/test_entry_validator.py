@@ -128,6 +128,18 @@ class EntryValidatorTest(unittest.TestCase):
             validate_entry("function", f)
         self.assertIn("formula", str(ctx.exception))
 
+    def test_function_formula_whitelist_enforced(self):
+        """formula 非法标识符（非白名单函数且非小写属性名）→ 字段级错误。"""
+        f = _valid_function()
+        f["formula"] = "HACK(amount)"  # HACK 非白名单函数
+        with self.assertRaises(EntryValidationError) as ctx:
+            validate_entry("function", f)
+        self.assertIn("formula", str(ctx.exception))
+        self.assertIn("HACK", str(ctx.exception))
+        # 合法公式（白名单函数 + 小写属性）通过
+        f["formula"] = "SUM(pay_amount) / COUNT(DISTINCT order_id)"
+        validate_entry("function", f)
+
     def test_function_status_enum_default(self):
         f = _valid_function()
         del f["status"]
