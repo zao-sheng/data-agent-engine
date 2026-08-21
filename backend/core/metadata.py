@@ -83,15 +83,35 @@ class MetadataService:
                     }
         return None
 
-    def find_tables(self, keyword: str) -> list[dict]:
-        """按关键字找表（表名 / 对象名 / 展示名 / 描述模糊匹配）。"""
+    def _query_tokens(self, keyword: str) -> list[str]:
+        """查询词分词：中文连续串拆 2-gram + 英文 token + 整句。
+
+        "消费订单的金额" → ["消费","费订","订单","单的","的金","金额"]（2-gram）
+        + 整句本身。停用词在 2-gram 后天然稀释，保留全部（够召回即可）。
+        """
+        import re as _re
         kw = keyword.strip().lower()
+        if not kw:
+            return []
+        tokens: list[str] = [kw]
+        for s in _re.findall(r"[\u4e00-\u9fff]+", kw):
+            for i in range(len(s) - 1):
+                tokens.append(s[i:i+2])
+        tokens += _re.findall(r"[a-z0-9_]+", kw)
+        return tokens
+
+    def find_tables(self, keyword: str) -> list[dict]:
+        """按关键字找表（表名 / 对象名 / 展示名 / 描述模糊匹配）。
+
+        支持整句与 2-gram 分词：查询词"退款 就绪时间"/"消费订单的金额"
+        任一 token 命中即召回（自然语言句子场景）。"""
+        tokens = self._query_tokens(keyword)
         hits = []
         for obj_name, o in self.onto.objects.items():
             for t in o.get("source_tables", []):
                 hay = " ".join([t["table"], obj_name, o.get("display_name", ""),
                                 o.get("description", ""), t.get("layer", "")]).lower()
-                if kw and kw in hay:
+                if any(tok in hay for tok in tokens):
                     info = self.table_info(t["table"])
                     if info:
                         hits.append(info)
@@ -124,14 +144,16 @@ class MetadataService:
         }
 
     def find_metrics(self, keyword: str) -> list[dict]:
-        """按关键字找指标（名称/展示名/描述/族/口径词）。"""
-        kw = keyword.strip().lower()
+        """按关键字找指标（名称/展示名/描述/族/口径词）。
+
+        支持整句与 2-gram 分词（同 find_tables）。"""
+        tokens = self._query_tokens(keyword)
         hits = []
         for fn in self.onto.functions.values():
             hay = " ".join([fn["name"], fn.get("display_name", ""),
                             fn.get("description", ""), fn.get("family", ""),
                             fn.get("variant_label", "")]).lower()
-            if kw and kw in hay:
+            if any(tok in hay for tok in tokens):
                 info = self.metric_info(fn["name"])
                 if info:
                     hits.append(info)

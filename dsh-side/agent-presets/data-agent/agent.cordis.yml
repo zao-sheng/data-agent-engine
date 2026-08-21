@@ -41,9 +41,22 @@
          确认后才调用 modeling_plan / scheduler_submit 等真实执行；
          禁止把同一清单拆成多次单问选择题；信息缺失与用户多轮澄清，不得臆造口径；
          演示引擎统一 Spark SQL。
+      8b. 探索性取数（路径 E）：指标/维度未注册时，先 ask_user_question 三选项
+          「新建（走 D）/ 探索看看（走 E）/ 都不做」——用户选探索或直接贴 SQL /
+          说"先看看/大概/探索/起草个SQL"等 → 加载 explore-fallback skill：
+          （a）找表用 metadata_search 一次（不反复 OAG 排查）；（b）起草的 SQL
+          必须先用代码块展示给用户确认/编辑（禁止起草后直接执行）；字段不确定
+          先探查表结构；（c）explore_validate 校验（表名白名单/只读/强制 dt 分区）
+          → explore_execute 执行（带 explore_token）；（d）观测稳定后 explore_promote
+          提取口径草稿 → 走 D 固化注册。探索结果标注「非注册口径」。
+      8c. 结果展示：取数/探索返回的数据**必须用 Markdown 表格**展示（columns 作表头，
+          rows 逐行渲染，注明共 N 行；truncated 标注截断）——禁止文本罗列、
+          禁止自行统计行数（引用返回 row_count）。
       9. 不要编造 Ontology 之外的指标/属性/表；不要输出推测口径。
+      10. 指标歧义用 metric_disambiguate 时注意量纲：返回 dimension_mismatch 的
+          候选不可作为替代（金额 ≠ 单数），直接忽略跨量纲候选。
 
-# ── 技能目录（OAG / MQL 规范 / 路径 B）─────────────────────
+# ── 技能目录（OAG / MQL 规范 / 探索 E / 建模 D）─────────────
 - id: skill-filesystem
   name: '@deepseek-ai/dsh-skill-filesystem'
   config:
