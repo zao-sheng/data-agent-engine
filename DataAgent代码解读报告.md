@@ -2,7 +2,7 @@
 
 > ⚠️ 本报告为阶段性代码解读快照，仓库结构/统计随迭代更新——以 README、`backend/tests/` 实际文件与测试结果为准。
 > 基准（原始）：commit `ac83dc7`（59 个文件，24 次提交）· 评测门禁 29/29（100%，阈值 ≥90%）
-> 最新：评测门禁 29/29 · 引擎单测 171 项（14 文件）· MCP 工具 19 个
+> 最新：评测门禁 29/29 · 引擎单测 189 项（16 文件）· MCP 工具 20 个
 > 目的：基于**当前代码**逐层解读技术架构、各层作用、安全模型、端到端执行过程与关键技术细节，供整体核对。
 
 ---
@@ -13,12 +13,12 @@
 data-agent-engine/  (59 files, 24 commits)
 ├── backend/                        # Python 引擎（100% Python，零 JS）
 │   ├── core/        18 模块（含 intent.py 意图识别，行数见 §3 各小节标题）
-│   ├── mcp_servers/  server.py     # FastMCP，19 个工具
+│   ├── mcp_servers/  server.py     # FastMCP，20 个工具
 │   ├── ontology/     config · objects · functions · relations · glossary（5 YAML）
 │   ├── seed/         schema.sql（15 表）· seed.py（固定种子生成器）
 │   ├── builder/      build_ontology.py（表结构→本体骨架）
 │   ├── eval/         golden_dataset.jsonl（29 条：21 翻译执行 + 8 意图分类）· eval.py（门禁）
-│   └── tests/        14 个文件 171 项测试（详见 §7）
+│   └── tests/        16 个文件 189 项测试（详见 §7）
 ├── dsh-side/         setup_dsh.py · test_setup_dsh.py
 │   └── agent-presets/data-agent/   preset + persona + 8 skills
 ├── install.sh · README.md · LICENSE(MIT) · backend/.env.example
@@ -211,7 +211,7 @@ plan-routing Step1 的结构化信号：实体识别（Ontology 指标/对象/�
 
 ---
 
-## 4. 工具面：`mcp_servers/server.py`（18 个工具）
+## 4. 工具面：`mcp_servers/server.py`（20 个工具）
 
 server 启动：`setup_runtime_logger` → 构建 Ontology/Validator/Translator/Executor/MetadataService → `run_startup_checks`（fail-fast）→ 初始化双令牌存储 → `setup_audit_logger` → FastMCP("data-agent")。所有工具经 `@_audit_tool` 包装（保留签名供 schema 生成；记录耗时/成败/入参摘要/结果规模，审计失败不影响主流程）。
 
@@ -233,6 +233,9 @@ server 启动：`setup_runtime_logger` → 构建 Ontology/Validator/Translator/
 | modeling_plan | 路径 D | 变更清单→配对 DDL+ETL | summary.paired 强制校验；返回 editable 字段 |
 | ontology_register | 路径 D | kind+entry→写本体存储 | 双通道（yaml / supabase，乐观锁）；注册后自动重载本体 |
 | ontology_reload | 运维 | 无参→重读本体 | 运行时刷新（多人编辑后当前会话读到最新） |
+| explore_validate | 探索 E | SQL→{ok, errors, explore_token} | 表名白名单/只读/强制 dt 分区；令牌绑定 SQL 指纹（120s） |
+| explore_execute | 探索 E | SQL+explore_token→结果集 | 独立探索令牌 + 只读护栏；结果标 explore=True（非注册口径） |
+| explore_promote | 探索 E | SQL→口径提取草稿 | 聚合→指标公式/维度/过滤（物理列反查业务属性）；draft 待确认后注册 |
 | scheduler_submit | 路径 D | task_spec→预留提示 | **预留占位**（待接平台 mcp-scheduler） |
 
 方言参数：`dialect: sqlite（默认，已实现已测试）/ mysql / doris / hive / sparksql（远程方言仅翻译，需在 backend/.env 配置 DATA_AGENT_DSN_<方言> 并接入 _execute_remote 后执行）`。
@@ -334,7 +337,7 @@ server 启动：`setup_runtime_logger` → 构建 Ontology/Validator/Translator/
 - **seed**：15 表（DWD×4/DWS×4/ADS×3/DIM×4），统一 `dt` 分区，字段跨层冗余；**DWS/ADS 由 DWD 用 SQL 聚合生成**（三层口径一致，评测可交叉验证）；固定种子 42 可复现；10% 无效单让过滤有意义；近 90 天数据。
 - **builder**：PRAGMA 读表结构 → 推断对象/映射/关系候选/粒度 → YAML 骨架（人工补 description/指标 formula/join_key 核对）；换主题时辅助生成本体。
 - **eval**：29 条金标准——21 条翻译执行（基础取数 / 多指标同域+跨域 / 指标族变体 / 行级权限 / 负例，断言：校验/表选择/可执行/行数/结果列/多表合并）+ **8 条意图分类**（expect_intent/mixed/metrics_missing，plan 层门禁）；通过率 ≥90% 门禁（当前 29/29 100%）；GitHub Actions CI（seed 重建 → eval → 引擎单测 → DSH 侧回归）。
-- **tests**：14 个文件 171 项全部通过（test_security 10 / test_dialects 5 / test_observability 6 / test_metadata 12 / test_modeling 15 / test_modeling_plan 13 / test_intent 19 / test_entry_validator 20 / test_explore 10 / test_ontology_store 18 / test_supabase_store 18 / test_ontology_writer 13 / test_ontology_sync 4 / **test_table_metadata 8**）。
+- **tests**：16 个文件 189 项全部通过（test_security 10 / test_dialects 5 / test_observability 6 / test_metadata 12 / test_modeling 15 / test_modeling_plan 13 / test_intent 19 / test_entry_validator 20 / test_disambiguate 7 / test_explore 12 / test_explore_promote 9 / test_ontology_store 18 / test_supabase_store 18 / test_ontology_writer 13 / test_ontology_sync 4 / **test_table_metadata 8**）。
 
 ---
 
@@ -545,7 +548,7 @@ DIALECT_VERIFIED = {"sqlite": True, "mysql": False, "doris": False,
 | 演示引擎 Spark SQL | ddl_gen / etl_gen（Hive 风格） | ✅ |
 | ETL 调度 | scheduler_submit | ⚠️ 预留 |
 | Skill 体系 | 8 skills | ✅ |
-| 评测门禁 | 21 条 + CI + 58 项单测 | ✅ |
+| 评测门禁 | 29 条 + CI + 189 项单测 | ✅ |
 | 五职能 Agent / 反馈飞轮 | 主 agent + skills / 未接 | ⚠️ 精简 / 🔲 |
 | 真实数仓执行 | _execute_remote + 四方言驱动 | 🔲 接入 DSN 后点亮 |
 

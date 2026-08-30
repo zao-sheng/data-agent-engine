@@ -50,6 +50,15 @@ def run(out: Path, seed: int = 42, days: int = 90) -> Path:
     first = today - timedelta(days=days - 1)
 
     conn = sqlite3.connect(out)
+    # 幂等重建：先清空全部表（schema.sql 是 CREATE IF NOT EXISTS，
+    # 旧库存在时直接 INSERT 会主键冲突——重跑/发布必须可重复生成）
+    _TABLES = ["dwd_ord_order_di", "dwd_ord_pay_di", "dwd_ord_consume_di",
+               "dwd_ord_refund_di", "dws_ord_order_1d", "dws_ord_pay_1d",
+               "dws_ord_consume_1d", "dws_ord_refund_1d", "ads_ord_gmv_1d",
+               "ads_ord_gmv_1m", "ads_ord_user_1d", "dim_product", "dim_store",
+               "dim_region", "dim_user"]
+    for t in _TABLES:
+        conn.execute(f"DROP TABLE IF EXISTS {t}")
     conn.executescript(Path(BASE_DIR / "schema.sql").read_text())
 
     # ── 1. DIM 维度表 ─────────────────────────────────────────

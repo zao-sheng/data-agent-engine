@@ -53,11 +53,15 @@ git clone <repo> && cd data-agent-engine
 | 探索性取数（路径 E） | 指标未注册时找表→写 SQL→受控执行观测；支持贴 SQL / NL 起草 / 混合三模式（零前端会话内交互）；`explore_validate`（表名白名单/只读/强制分区）+ `explore_execute`（独立令牌）+ `explore_promote`（探索 SQL→口径草稿，物理列自动反查业务属性）——观测稳定后经草稿确认走路径 D 固化注册 |
 | 本体存储 | YAML 默认 / SQLite 产物 / Supabase 真源，换存储只动读取层（store 接口）；凭证只从 `.env` 读取，不写死在代码/脚本 |
 | 安全与运维 | 双令牌 + 审计/运行日志（轮转）+ 启动自检 + health_check + 配置外置 `.env` |
-| 评测门禁 | Golden Dataset 回归（29 条：翻译执行 + 意图分类）+ 171 项单测，CI 自动跑 |
+| 评测门禁 | Golden Dataset 回归（29 条：翻译执行 + 意图分类）+ 189 项单测，CI 自动跑 |
 
 ## 示例提问（部署后直接问）
 
 以下提问全部基于自带 order 样例数据（固定种子，结果可复现）。
+**样例数据日期范围：随生成日期滚动 90 天**（`seed.seed` 基于当天生成，
+如今天运行则覆盖近 90 天；`./install.sh` / `update` 会重建样例库）——
+以下用例中的具体日期（如 20260817）均在任意一次生成的 90 天窗口内，
+可直接查询验证。
 
 | 提问 | 预期表现 |
 |------|---------|
@@ -67,6 +71,8 @@ git clone <repo> && cd data-agent-engine
 | 华东区 poi 的 goods 销售额 | 黑话归一：poi→门店、goods→产品、销售额→GMV，回答用词跟随原话 |
 | 下单 GMV 最近 30 天 | 精确命中下单口径，结果与支付口径不同 |
 | GMV 有哪几种口径 | 召回支付/下单/消费三种口径，请你选择 |
+| 2026-08-17 的支付金额按区域分布 | 指定日期查询：`dwd_ord_pay_di` 按 region_id 聚合 |
+| 2026-08-01 ~ 2026-08-17 退款订单数 | 区间查询：`refund_count`（COUNT(*)，过滤 is_valid=1） |
 | 帮我新建一个按周汇总的用户复购率指标 | 走路径 D：需求清单（可编辑）→ 方案书 → modeling_plan 配对 DDL+ETL → … → SLA/DQC |
 | 查 dwd_ord_pay_di 表里 pay_amt 大于 100 的 | 物理表/字段名被校验器拒绝，不硬写物理名 |
 
@@ -118,6 +124,7 @@ DSH 侧（配置，零代码）                Python 侧（引擎）
                                        │  ├ 执行: semantic_translate  │
                                        │  ├ 执行: execute_sql（只读）  │
                                        │  ├ 建模: ddl/etl/modeling_plan
+                                       │  ├ 探索: explore_validate/execute/promote
                                        │  ├ 本体: ontology_register/reload
                                        │  └ 运维: health_check / scheduler_submit(预留)
                                        └──────────────────────────────┘
@@ -129,12 +136,13 @@ DSH 侧（配置，零代码）                Python 侧（引擎）
 backend/
 ├── seed/          样例数据生成器（schema.sql + seed.py，固定种子）
 ├── ontology/      Ontology 源（objects/functions/relations/glossary/config）
-├── core/          确定性引擎（18 模块：translator/validator/executor/metadata/
+├── core/          确定性引擎（24 模块：translator/validator/executor/metadata/
 │                  ddl_gen/etl_gen/modeling_plan/intent/ontology_store/ontology_writer/
-│                  query_token/confirm_token/audit/runtime_log/startup_check/config）
-├── mcp_servers/   FastMCP 入口（19 个工具）
+│                  entry_validator/explore/explore_promote/mql_schema/table_naming/
+│                  token_base/query_token/confirm_token/audit/runtime_log/startup_check/config）
+├── mcp_servers/   FastMCP 入口（20 个工具）
 ├── supabase/      schema.sql（7 张表建表，含全部治理列）+ rls.sql（权限）
-├── tests/         14 文件 171 项单测
+├── tests/         16 文件 189 项单测
 └── eval/          Golden Dataset（29 条）+ 评测门禁
 dsh-side/          setup_dsh.py + 「数据助理」预设模板 + 8 个 skills
 ```
