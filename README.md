@@ -184,7 +184,6 @@ dsh-side/          setup_dsh.py + 「数据助理」预设模板 + 8 个 skills
 
 ## 文档
 
-- [代码解读报告（当前代码）](DataAgent代码解读报告.md)
 - [数据仓库规范](dsh-side/agent-presets/data-agent/skills/warehouse-standards/SKILL.md)
 - [建模流程规范](dsh-side/agent-presets/data-agent/skills/modeling-workflow/SKILL.md)
 - [探索性取数工作流（路径 E）](docs/explore-workflow.md)
