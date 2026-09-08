@@ -70,8 +70,12 @@ def _patch_block(backend: str) -> str:
     2. mcp-client 的 stdio spawn 使用 host 进程的 cwd（DSH profile 目录，
        不是 backend），所以脚本路径必须绝对化，并显式指定 cwd 指向
        backend，避免 'mcp_servers/server.py' 找不到（Errno 2）。
+    3. 直接用 backend 的 venv python 启动（install.sh 已建好 .venv），
+       不用 `uv run`——uv run 依赖缓存目录可写且会重新解析依赖，
+       全新/受限环境可能失败；venv python 零额外依赖、克隆即跑。
     """
-    uv = shutil.which("uv") or "uv"
+    py = str(Path(backend) / ".venv" / "bin" / "python")
+    server = str(Path(backend) / "mcp_servers" / "server.py")
     return f"""# --- data-agent engine (auto-managed by setup_dsh.py) ---
 - insert:
     - id: mcp-data-agent
@@ -79,8 +83,8 @@ def _patch_block(backend: str) -> str:
       config:
         serverName: dataagent
         transport: stdio
-        command: {uv}
-        args: ['run', '--project', '{backend}', 'python', '{backend}/mcp_servers/server.py']
+        command: {py}
+        args: ['{server}']
         cwd: '{backend}'
         env: {{ PYTHONUNBUFFERED: '1' }}
         toolCallTimeoutMs: 120000

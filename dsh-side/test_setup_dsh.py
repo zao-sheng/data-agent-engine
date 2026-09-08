@@ -56,6 +56,15 @@ class PatchBlockTest(unittest.TestCase):
         # 不允许出现裸相对脚本路径
         self.assertNotIn("'python', 'mcp_servers/server.py'", block)
 
+    def test_block_uses_venv_python_not_uv_run(self):
+        """直接用 backend/.venv/bin/python 启动，不用 uv run——
+        uv run 依赖缓存目录可写且会重新解析依赖，全新/受限环境可能失败；
+        venv 由 install.sh 建好，零额外依赖。"""
+        block = _patch_block(self.backend)
+        self.assertIn(f"command: {self.backend}/.venv/bin/python", block)
+        self.assertNotIn("uv run", block)
+        self.assertNotIn("'run'", block)
+
     @unittest.skipUnless(HAS_YAML, "需要 pyyaml 验证 YAML 可解析")
     def test_block_is_valid_yaml_with_insert_shape(self):
         """YAML 解析后应得到 [{insert: [{id, name, config}]}]。"""

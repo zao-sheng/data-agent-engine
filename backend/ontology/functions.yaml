@@ -159,6 +159,23 @@ functions:
     do_not: "退款金额统计退款表，不冲减 GMV"
     version: v1.0
 
+  - name: refund_count
+    display_name: 退款订单量
+    description: 有效退款订单量（退款笔数）：Refund 事实表有效退款记录数
+    owner: Refund
+    domain: ord
+    category: 交易
+    status: active
+    data_owner: 交易数据组
+    unit: 笔
+    tags: [财务, 监管]
+    formula: "COUNT(*)"
+    required_filters: ["is_valid = 1"]
+    supported_dimensions: [store_type, city, region_name, province, order_date]
+    supported_granularities: [day, week, month, quarter, year]
+    do_not: "退款订单量=退款记录笔数（COUNT(*)，非去重订单数）；预聚合表已内置 is_valid=1 过滤；不冲减 GMV"
+    version: v1.0
+
   - name: order_user_cnt
     display_name: 下单用户数
     description: 有效下单的去重用户数
