@@ -9,7 +9,17 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-PY=backend/.venv/bin/python
+BACKEND="$(pwd)/backend"
+PY="$BACKEND/.venv/bin/python"
+
+# run_py：在 backend/ 目录下执行 venv python。
+# 模块（seed/ontology_compile/eval/ontology_import...）都在 backend/ 下，
+# 从项目根 `-m` 会 ModuleNotFoundError（除非 venv 装了 editable——全新安装
+# 只有 requirements，没有 editable）。故统一 cd backend 后执行。
+# 注意：传给 python 的相对路径参数均相对 backend/ 目录。
+run_py() {
+  (cd "$BACKEND" && ./.venv/bin/python "$@")
+}
 
 check_uv() {
   command -v uv >/dev/null 2>&1 || { echo "❌ 未安装 uv，请先安装: https://docs.astral.sh/uv/"; exit 1; }
@@ -18,7 +28,7 @@ check_uv() {
 do_env() {
   echo "==> Python 环境与依赖（backend/.venv；首次安装需几分钟）"
   if [ ! -x "$PY" ]; then
-    uv venv backend/.venv
+    uv venv "$BACKEND/.venv"
   fi
   # 直接用 venv python 检查依赖（避免 uv run 的缓存/网络差异）
   "$PY" -c "import mcp, yaml" 2>/dev/null \
@@ -28,22 +38,22 @@ do_env() {
 do_sample() {
   echo "==> 重建 order 主题样例库（15 张表，固定种子可复现）"
   rm -f backend/seed/sample.db
-  "$PY" -m seed.seed --out backend/seed/sample.db --seed 42
+  run_py -m seed.seed --out seed/sample.db --seed 42
 }
 
 do_compile() {
   echo "==> 本体编译（YAML → SQLite 产物，验证编译流水线）"
-  "$PY" -m ontology_compile --yaml backend/ontology --out /tmp/ontology-verify.db
+  run_py -m ontology_compile --yaml ontology --out /tmp/ontology-verify.db
   rm -f /tmp/ontology-verify.db
 }
 
 do_gate() {
   echo "==> 评测门禁"
-  "$PY" -m eval.eval || echo "⚠️ 评测未通过，请检查"
+  run_py -m eval.eval || echo "⚠️ 评测未通过，请检查"
   echo "==> 引擎单测"
-  (cd backend && .venv/bin/python -m unittest discover -s tests 2>/dev/null || true)
+  run_py -m unittest discover -s tests 2>/dev/null || true
   echo "==> DSH 侧回归"
-  "$PY" -m unittest discover -s dsh-side 2>/dev/null || true
+  run_py -m unittest discover -s "$(dirname "$BACKEND")/dsh-side" 2>/dev/null || true
 }
 
 MODE="${1:-install}"
@@ -52,7 +62,7 @@ case "$MODE" in
     check_uv
     do_env
     do_sample
-    "$PY" dsh-side/setup_dsh.py --backend "$(pwd)/backend"
+    "$PY" dsh-side/setup_dsh.py --backend "$BACKEND"
     do_compile
     echo ""
     echo "✅ 安装完成。"
@@ -60,12 +70,12 @@ case "$MODE" in
     echo "  2) 重启 DSH（或等待 HMR 热生效）"
     echo "  3) 新开会话，预设选择「数据助理」，提问示例见 README「示例提问」"
     echo ""
-    echo "评测门禁: $PY -m eval.eval"
+    echo "评测门禁: cd backend && .venv/bin/python -m eval.eval"
     ;;
   --real|real)
     check_uv
     do_env
-    "$PY" dsh-side/setup_dsh.py --backend "$(pwd)/backend"
+    "$PY" dsh-side/setup_dsh.py --backend "$BACKEND"
     echo ""
     echo "✅ 真实数仓模式配置完成。"
     echo "  请配置 backend/.env（连接串/驱动），运行 builder 生成本体（见 README「二次开发」）"
@@ -74,7 +84,7 @@ case "$MODE" in
     check_uv
     do_env
     do_sample
-    "$PY" dsh-side/setup_dsh.py --backend "$(pwd)/backend"
+    "$PY" dsh-side/setup_dsh.py --backend "$BACKEND"
     echo ""
     echo "==> Supabase 本体真源模式"
     echo "  1) 建表：在 Supabase SQL Editor 执行 backend/supabase/schema.sql"
@@ -84,9 +94,9 @@ case "$MODE" in
     echo "     DATA_AGENT_SUPABASE_URL=https://xxxx.supabase.co"
     echo "     DATA_AGENT_SUPABASE_KEY=service_role_key"
     echo "  3) 导入样例本体（需先配置 .env）:"
-    echo "     $PY -m ontology_import --yaml backend/ontology"
+    echo "     cd backend && .venv/bin/python -m ontology_import --yaml ontology"
     echo "  4) 验证一致性:"
-    echo "     $PY -m ontology_sync_check --yaml backend/ontology"
+    echo "     cd backend && .venv/bin/python -m ontology_sync_check --yaml ontology"
     echo ""
     echo "✅ Supabase 模式配置指引完成。配置好后重启 DSH，引擎从云端读本体。"
     ;;
@@ -96,7 +106,7 @@ case "$MODE" in
     check_uv
     do_env
     do_sample
-    "$PY" dsh-side/setup_dsh.py --backend "$(pwd)/backend" --mode update
+    "$PY" dsh-side/setup_dsh.py --backend "$BACKEND" --mode update
     do_compile
     do_gate
     echo ""
