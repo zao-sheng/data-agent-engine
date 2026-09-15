@@ -3,6 +3,9 @@ __pycache__/
 *.pyc
 .venv/
 .uv-cache/
+# uv 每次 uv run 都会按 pyproject 重新生成（依赖真源是 pyproject/requirements.txt）
+uv.lock
+.uvcache/
 
 # 样例库可再生成，不入库
 *.db

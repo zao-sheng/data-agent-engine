@@ -14,13 +14,27 @@ jobs:
       - run: DATA_AGENT_ONTOLOGY_STORE=sqlite DATA_AGENT_ONTOLOGY_DB=/tmp/ontology.db uv run --project backend python -m eval.eval
       - run: uv run --project backend python -m eval.eval
       # 引擎单元测试（安全/方言/可观测/元数据/建模/路径D/本体存储/同步）
-      - run: uv run --project backend python -m unittest discover -s tests
-      # DSH 侧配置回归（patch 格式 / upsert 幂等）
-      - run: uv run --project backend python -m unittest discover -s ../dsh-side
+      # 注意：unittest discover 的 -s 是相对**当前工作目录**的路径，且 backend 内的
+      # 模块（core/seed/eval...）以 backend 为导入根，所以这两步的 cwd 必须是
+      # backend/（`uv run --project backend` 只指定项目，不会切换 cwd）。
+      - name: Engine unit tests
+        run: uv run python -m unittest discover -s tests
+        working-directory: backend
+      # DSH 侧配置回归（patch 格式 / upsert 幂等 / DSH 版本兼容）
+      - name: DSH-side config regression
+        run: uv run python -m unittest discover -s ../dsh-side
+        working-directory: backend
       # 本体同步检查（多人编辑闭环）：配置 Supabase Secrets 后验证 YAML↔DB 一致
+      # 注意：`secrets` 上下文在 step 级 `if` 中不可用——写成
+      # `if: ${{ secrets.X != '' }}` 会让整个 workflow 校验失败（一个 job 都不会
+      # 创建：run 显示 failed，但 /jobs 接口返回空）。必须经 env 传入后在 shell 里判断。
       - name: Ontology sync check (optional)
-        if: ${{ secrets.SUPABASE_URL != '' }}
         env:
           DATA_AGENT_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           DATA_AGENT_SUPABASE_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
-        run: uv run --project backend python -m ontology_sync_check --yaml backend/ontology
+        run: |
+          if [ -z "$DATA_AGENT_SUPABASE_URL" ]; then
+            echo "未配置 SUPABASE_URL secret，跳过本体同步检查"
+            exit 0
+          fi
+          uv run --project backend python -m ontology_sync_check --yaml backend/ontology
