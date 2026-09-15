@@ -66,9 +66,9 @@ case "$MODE" in
     do_compile
     echo ""
     echo "✅ 安装完成。"
-    echo "  1) 首次运行请执行: cd ~/.dsh/profiles/web && pnpm install   （安装 dsh-mcp-client 依赖）"
-    echo "  2) 重启 DSH（或等待 HMR 热生效）"
-    echo "  3) 新开会话，预设选择「数据助理」，提问示例见 README「示例提问」"
+    echo "  1) 重启 DSH（或等待 HMR 热生效）"
+    echo "  2) 新开会话，预设选择「数据助理」，提问示例见 README「示例提问」"
+    echo "     （dsh-mcp-client 由 DSH 运行时自带，无需 dsh plugin install）"
     echo ""
     echo "评测门禁: cd backend && .venv/bin/python -m eval.eval"
     ;;
@@ -121,8 +121,7 @@ case "$MODE" in
     rm -rf backend/.venv && echo "    已删除虚拟环境 backend/.venv"
     echo ""
     echo "✅ 卸载完成。源码保留（backend/ontology 等仓库文件未动）。"
-    echo "  如需彻底移除 dsh-mcp-client 依赖（仅当无其他插件使用）："
-    echo "    cd ~/.dsh/profiles/web && pnpm remove @deepseek-ai/dsh-mcp-client"
+    echo "  dsh-mcp-client 由 DSH 运行时自带，无需清理依赖。"
     ;;
   *)
     echo "用法: ./install.sh [install|--sample|--real|--supabase|update|uninstall]"

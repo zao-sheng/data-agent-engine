@@ -11,13 +11,21 @@
 """
 from __future__ import annotations
 
+import json
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from setup_dsh import _block_range, _patch_block
+from setup_dsh import (
+    _block_range,
+    _patch_block,
+    ensure_mcp_client_dep,
+    remove_patch,
+    upsert_patch,
+)
 
 try:
     import yaml
@@ -130,6 +138,166 @@ class PatchBlockTest(unittest.TestCase):
         s, e = r
         self.assertIn("# --- end data-agent engine", text[s:e])
         self.assertEqual(text[e:], "y\n")
+
+
+class Dsh015CompatTest(unittest.TestCase):
+    """DSH 0.1.5+ profile 布局兼容性回归。
+
+    背景 bug（2026-09-10 修复）：升级 DSH 后 `dsh --profile web --dump-config`
+    报 patch 解析失败、MCP 插件「均无法挂载」。两个根因：
+      1) 新版 profile 的 cordis.patch.yml 初始内容由「注释」变为
+         「注释 + 空数组 `[]`」。旧 upsert_patch 直接 append，产出
+         `[]\\n- insert:` 这种非法 YAML，整份 patch 层解析失败 →
+         该 profile 所有插件（不止 data-agent）都挂不上。
+      2) ensure_mcp_client_dep 把 dsh-mcp-client 同时写进
+         dsh.profile.bundles。新版 bundles 只接受「组合包」（提供 patch
+         层的包，如 dsh-base/dsh-web-app）；插件应只进 dependencies。
+    """
+
+    def setUp(self):
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.profile = Path(self._tmp.name)
+        self.backend = "/tmp/backend"
+        self.patch = self.profile / "cordis.patch.yml"
+        self.pkg = self.profile / "package.json"
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _patch_docs(self):
+        """返回 patch 文件解析后的顶层列表（yaml.safe_load；空文件 → []）。"""
+        return yaml.safe_load(self.patch.read_text()) or []
+
+    def test_upsert_replaces_empty_list_placeholder(self):
+        """新版默认的 `[]` 占位必须被就地替换，而不是在其后追加。"""
+        self.patch.write_text("# dsh profile patch layer\n[]\n")
+        upsert_patch(self.profile, self.backend)
+        text = self.patch.read_text()
+        # 不再有顶格的空数组行
+        self.assertIsNone(_empty_line(text), f"仍存在空数组占位行:\n{text}")
+        if HAS_YAML:
+            docs = self._patch_docs()
+            self.assertEqual(len(docs), 1, "patch 层应恰有一个顶层条目")
+            self.assertIn("insert", docs[0])
+            self.assertEqual(docs[0]["insert"][0]["id"], "mcp-data-agent")
+
+    def test_upsert_appends_when_no_placeholder(self):
+        """旧版注释-only 文件（无 `[]`）仍走追加路径，结果合法。"""
+        self.patch.write_text("# dsh profile patch layer\n")
+        upsert_patch(self.profile, self.backend)
+        if HAS_YAML:
+            docs = self._patch_docs()
+            self.assertEqual(len(docs), 1)
+            self.assertIn("insert", docs[0])
+
+    def test_upsert_is_idempotent(self):
+        """连续 upsert 不应重复插入条目（路径变化时更新原块）。"""
+        self.patch.write_text("# dsh profile patch layer\n[]\n")
+        upsert_patch(self.profile, self.backend)
+        upsert_patch(self.profile, "/other/backend")
+        text = self.patch.read_text()
+        self.assertEqual(text.count("id: mcp-data-agent"), 1)
+        self.assertIn("/other/backend", text)
+        self.assertNotIn(self.backend, text, "旧路径应被替换")
+        if HAS_YAML:
+            docs = self._patch_docs()
+            self.assertEqual(len(docs), 1)
+
+    def test_remove_patch_restores_valid_empty_layer(self):
+        """移除后文件仍须是可解析的空 patch 层（补回 `[]` 占位）。"""
+        self.patch.write_text("# dsh profile patch layer\n[]\n")
+        upsert_patch(self.profile, self.backend)
+        remove_patch(self.profile)
+        text = self.patch.read_text()
+        self.assertNotIn("mcp-data-agent", text)
+        if HAS_YAML:
+            self.assertEqual(self._patch_docs(), [], "空 patch 层应解析为空列表")
+
+    def test_ensure_dep_moves_plugin_out_of_bundles(self):
+        """历史版本写进 bundles 的插件条目要被清理（插件 ≠ 组合包）。"""
+        (self.profile / "node_modules" / "@deepseek-ai"
+         / "dsh-mcp-client").mkdir(parents=True)
+        self.pkg.write_text(json.dumps({
+            "dependencies": {"@deepseek-ai/dsh-mcp-client": "latest"},
+            "dsh": {"profile": {"bundles": [
+                "@deepseek-ai/dsh-base",
+                "@deepseek-ai/dsh-mcp-client",
+            ]}},
+        }))
+        need_install = ensure_mcp_client_dep(self.profile)
+        data = json.loads(self.pkg.read_text())
+        self.assertFalse(need_install, "运行时自带插件 → 无需用户安装")
+        self.assertNotIn("@deepseek-ai/dsh-mcp-client",
+                         data["dsh"]["profile"]["bundles"])
+        # 组合包不能被误删
+        self.assertIn("@deepseek-ai/dsh-base", data["dsh"]["profile"]["bundles"])
+
+    def test_ensure_dep_drops_declaration_when_runtime_provides_it(self):
+        """DSH 运行时自带的插件不应再声明在 profile dependencies——
+        旧脚本写的 `latest` 会与运行时版本漂移、安装后覆盖自带副本。"""
+        (self.profile / "node_modules" / "@deepseek-ai"
+         / "dsh-mcp-client").mkdir(parents=True)
+        self.pkg.write_text(json.dumps({
+            "dependencies": {"@deepseek-ai/dsh-mcp-client": "latest"},
+            "dsh": {"profile": {"bundles": ["@deepseek-ai/dsh-base"]}},
+        }))
+        self.assertFalse(ensure_mcp_client_dep(self.profile))
+        data = json.loads(self.pkg.read_text())
+        self.assertNotIn("@deepseek-ai/dsh-mcp-client", data["dependencies"])
+
+    def test_ensure_dep_hoisted_runtime_link_counts_as_resolvable(self):
+        """profile 上一级的 node_modules（DSH 提升安装位置）同样算可用。"""
+        parent = self.profile.parent
+        # setUp 用 TemporaryDirectory 作为 profile，这里模拟 ~/.dsh/profiles 布局
+        self._tmp.cleanup()
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        root = Path(self._tmp.name)
+        self.profile = root / "web"
+        self.profile.mkdir()
+        self.pkg = self.profile / "package.json"
+        (root / "node_modules" / "@deepseek-ai" / "dsh-mcp-client").mkdir(parents=True)
+        self.pkg.write_text(json.dumps({
+            "dependencies": {"@deepseek-ai/dsh-mcp-client": "latest"},
+        }))
+        self.assertFalse(ensure_mcp_client_dep(self.profile))
+        data = json.loads(self.pkg.read_text())
+        self.assertNotIn("@deepseek-ai/dsh-mcp-client", data["dependencies"])
+
+    def test_ensure_dep_declares_pinned_spec_when_unresolvable(self):
+        """解析不到插件时才声明依赖，且 spec 锁定到运行时版本（不用 latest）。"""
+        self.pkg.write_text(json.dumps({
+            "dependencies": {},
+            "dsh": {"profile": {"bundles": ["@deepseek-ai/dsh-base"]}},
+        }))
+        with mock.patch("setup_dsh._dsh_version", return_value="0.1.5-rc.1"):
+            need_install = ensure_mcp_client_dep(self.profile)
+        data = json.loads(self.pkg.read_text())
+        self.assertTrue(need_install, "需提示用户执行 dsh plugin install")
+        self.assertEqual(data["dependencies"]["@deepseek-ai/dsh-mcp-client"],
+                         "^0.1.5-rc.1")
+        self.assertEqual(data["dsh"]["profile"]["bundles"],
+                         ["@deepseek-ai/dsh-base"])
+
+    def test_ensure_dep_creates_no_bundles_key_when_absent(self):
+        """package.json 无 dsh 段时不应凭空创建 dsh.profile.bundles。"""
+        (self.profile / "node_modules" / "@deepseek-ai"
+         / "dsh-mcp-client").mkdir(parents=True)
+        self.pkg.write_text(json.dumps({"dependencies": {}}))
+        ensure_mcp_client_dep(self.profile)
+        data = json.loads(self.pkg.read_text())
+        self.assertNotIn("dsh", data)
+
+
+def _empty_line(text: str) -> str | None:
+    """返回顶格 `[]` 占位行（含行尾换行），无则 None。"""
+    for line in text.splitlines():
+        if line.strip() == "[]":
+            return line
+    return None
 
 
 if __name__ == "__main__":

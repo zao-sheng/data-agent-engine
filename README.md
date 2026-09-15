@@ -25,7 +25,8 @@ git clone <repo> && cd data-agent-engine
 #   "上个月华东区活跃用户的平均客单价，按周拆分"
 ```
 
-> 首次运行需手动 `cd ~/.dsh/profiles/web && pnpm install`（安装 dsh-mcp-client 依赖）。
+> **无需手动安装插件**：`dsh-mcp-client` 由 DSH 运行时自带，`install.sh` 自动写好 profile patch 层。
+> 若 `dsh --profile web --dump-config` 中看不到 `mcp-data-agent`，重跑 `./install.sh update` 后重启 DSH。
 
 ### 三种部署模式（选一）
 
