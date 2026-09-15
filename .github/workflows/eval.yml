@@ -7,7 +7,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uv pip install --system -r backend/requirements.txt
+      # 依赖安装：uv sync 会按 backend/pyproject.toml 建 backend/.venv 并装齐依赖
+      # （与 requirements.txt 内容一致：mcp + pyyaml），后续 uv run 直接复用该环境。
+      # 不要用 `uv pip install --system`——runner 的系统 Python 是 PEP 668
+      # externally-managed，会直接以 exit 2 失败（且装了也无人使用）。
+      - name: Install dependencies
+        run: uv sync --project backend
       - run: uv run --project backend python -m seed.seed --out backend/seed/sample.db --seed 42
       # 本体编译（1B）：YAML → SQLite 产物，验证编译流水线 + SqliteStore 可读
       - run: uv run --project backend python -m ontology_compile --yaml backend/ontology --out /tmp/ontology.db --commit
