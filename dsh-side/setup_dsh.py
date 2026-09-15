@@ -187,9 +187,9 @@ def ensure_mcp_client_dep(profile: Path) -> bool:
 
     DSH 0.1.5+ 语义（两个都要遵守，否则 MCP 挂不上）：
     1. `dsh-mcp-client` 是**树外插件**，只能出现在 profile `package.json`
-       的 `dependencies`；**不能**写进 `dsh.profile.bundles`——bundles 是
-       **组合包**列表（提供 patch 层的包，如 dsh-base / dsh-web-app）。
-       历史版本写错的 bundles 条目在此清理。
+       的 `dependencies`；**不能**写进 `dsh.profile.bundles`（0.0.x 的旧语义
+       允许插件进 bundles，0.1.5+ 只接受提供 patch 层的**组合包**，如
+       dsh-base / dsh-web-app）。旧脚本按旧语义写下的 bundles 条目在此清理。
     2. DSH 运行时**自带** dsh-mcp-client。若它已可从 profile 解析到，则
        profile 里不应再声明（旧版脚本写的 `latest` 会与运行时版本漂移，
        经 pnpm 安装后反而覆盖自带副本）——此时删除该声明并返回 False。
@@ -207,12 +207,12 @@ def ensure_mcp_client_dep(profile: Path) -> bool:
     bundles = data.get("dsh", {}).get("profile", {}).get("bundles", [])
     changed = False
 
-    # (1) 清理历史版本错误写入 bundles 的条目（插件 ≠ 组合包）
+    # (1) 清理旧语义写入 bundles 的条目（0.1.5+ 的 bundles 只接受组合包）
     if mcp in bundles:
         bundles.remove(mcp)
         data["dsh"]["profile"]["bundles"] = bundles
         changed = True
-        print(f"✅ 已从 dsh.profile.bundles 移除 {mcp}（插件不是组合包）")
+        print(f"✅ 已从 dsh.profile.bundles 移除 {mcp}（0.1.5+ 的 bundles 只收组合包）")
 
     resolvable = _mcp_client_resolvable(profile)
     need_install = False
