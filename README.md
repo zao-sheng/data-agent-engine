@@ -27,6 +27,9 @@ git clone <repo> && cd data-agent-engine
 
 > **无需手动安装插件**：`dsh-mcp-client` 由 DSH 运行时自带，`install.sh` 自动写好 profile patch 层。
 > 若 `dsh --profile web --dump-config` 中看不到 `mcp-data-agent`，重跑 `./install.sh update` 后重启 DSH。
+>
+> **零第三方插件依赖**：只依赖原版 DSH + Python venv，不依赖任何第三方 DSH 插件/UI 包。
+> profile 配置中出现的包仅有官方 `@deepseek-ai/*`（运行时自带，含 `dsh-mcp-client`）。
 
 ### 三种部署模式（选一）
 
