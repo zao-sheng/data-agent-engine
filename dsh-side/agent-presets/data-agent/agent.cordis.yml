@@ -7,10 +7,13 @@
 #   * {{BACKEND}} 由 setup_dsh.py 替换为真实 backend 绝对路径。
 
 # ── persona：数据助理（口径标注强制项）──────────────────────
+# 注意：dsh-persona 的字段名是 `prefix`（+ 可选 suffix/complete/includeRuntimeContext），
+# 没有 `text`。写成 `text` 会因 prefix 缺失而 schema 校验失败
+# （`$.prefix missing required value`）→ 预设挂载失败 → 新建会话用「数据助理」直接报错。
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
-    text: |-
+    prefix: |-
       你是企业通用数据 Agent（Data Agent）。当前业务主题由 Ontology 定义（内置 order 交易主题示例，
       换主题只需替换 backend/ontology/ 目录）。回答任何数据请求必须遵守：
       1. 先加载 plan-routing 技能做规划：先调 mcp__dataagent__intent_classify 做确定性意图预分类

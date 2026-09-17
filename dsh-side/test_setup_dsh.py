@@ -12,6 +12,9 @@
 from __future__ import annotations
 
 import json
+import os
+import re
+import shutil
 import sys
 import unittest
 from pathlib import Path
@@ -298,6 +301,117 @@ def _empty_line(text: str) -> str | None:
         if line.strip() == "[]":
             return line
     return None
+
+
+# ── 预设（agent.cordis.yml）与已安装 DSH 插件 schema 的一致性 ──────────────
+
+PRESET = (Path(__file__).resolve().parent / "agent-presets" / "data-agent"
+          / "agent.cordis.yml")
+
+
+if HAS_YAML:
+    class _PresetLoader(yaml.SafeLoader):
+        """允许 DSH 的 `!!js` 标签：求值发生在宿主，这里按字符串读入即可。"""
+
+    _PresetLoader.add_constructor("tag:yaml.org,2002:js",
+                                  lambda loader, node: loader.construct_scalar(node))
+
+
+def _load_preset_rows() -> list[dict]:
+    """解析预设组合文件为行列表。"""
+    return yaml.load(PRESET.read_text(), Loader=_PresetLoader)
+
+
+def _dsh_plugin_root() -> Path | None:
+    """定位已安装 DSH 的插件目录（<dsh-root>/node_modules/@deepseek-ai）。"""
+    exe = shutil.which("dsh")
+    if not exe:
+        return None
+    for cand in [Path(os.path.realpath(exe)).parent, *Path(os.path.realpath(exe)).parents]:
+        pkg = cand / "package.json"
+        if not pkg.exists():
+            continue
+        try:
+            if json.loads(pkg.read_text()).get("name") == "@deepseek-ai/dsh":
+                return cand / "node_modules" / "@deepseek-ai"
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def _config_schema(plugin_root: Path, pkg: str) -> tuple[set[str], set[str]] | None:
+    """从插件 lib/index.js 抽取 `const Config = z.object({...})` 的
+    (全部字段, 必填字段)。抽不到返回 None（该行跳过校验）。"""
+    src = plugin_root / pkg / "lib" / "index.js"
+    if not src.exists():
+        return None
+    m = re.search(r"const Config = z\.object\(\{(.*?)\}\);", src.read_text(), re.S)
+    if not m:
+        return None
+    all_keys: set[str] = set()
+    required: set[str] = set()
+    for line in m.group(1).splitlines():
+        km = re.match(r"\s*([A-Za-z_$][\w$]*)\s*:\s*z\.", line)
+        if not km:
+            continue
+        all_keys.add(km.group(1))
+        if ".required()" in line:
+            required.add(km.group(1))
+    return (all_keys, required) if all_keys else None
+
+
+@unittest.skipUnless(HAS_YAML, "需要 pyyaml 解析预设")
+class PresetSchemaTest(unittest.TestCase):
+    """预设行必须与已安装 DSH 的插件 config schema 一致。
+
+    背景 bug（2026-09-15）：preset 的 persona 行写成 `text:`，而 0.1.5 的
+    dsh-persona 字段是 `prefix`（required）——启动会话时报
+    `$.prefix missing required value`，预设挂载失败，新建会话选「数据助理」
+    直接报错。危害面被放大是因为 `install.sh update` 会把仓库源覆盖到
+    ~/.dsh，源文件里的错键会原样打到用户环境。
+    """
+
+    def test_rows_have_id_and_name(self):
+        rows = _load_preset_rows()
+        self.assertTrue(rows, "预设不应为空")
+        for row in rows:
+            self.assertIn("id", row, row)
+            self.assertTrue(str(row.get("name", "")).startswith("@deepseek-ai/"), row)
+
+    def test_persona_uses_prefix_not_text(self):
+        """dsh-persona 只认 prefix / suffix / complete / includeRuntimeContext。"""
+        rows = [r for r in _load_preset_rows()
+                if r["name"] == "@deepseek-ai/dsh-persona"]
+        self.assertTrue(rows, "预设应有一行 persona")
+        cfg = rows[0].get("config") or {}
+        self.assertNotIn("text", cfg,
+                         "dsh-persona 没有 text 字段（0.1.5 起为 prefix）")
+        self.assertIn("prefix", cfg, "dsh-persona 的 prefix 是必填字段")
+        self.assertTrue(str(cfg["prefix"]).strip(), "prefix 不能为空")
+
+    def test_rows_only_use_declared_schema_keys(self):
+        """逐行对照已安装插件 schema：字段名必须存在、必填项必须给全。"""
+        root = _dsh_plugin_root()
+        if root is None:
+            self.skipTest("未安装 DSH，跳过 schema 对照")
+        checked = 0
+        for row in _load_preset_rows():
+            pkg = str(row["name"]).split("/")[-1]
+            schema = _config_schema(root, pkg)
+            if schema is None:
+                continue
+            all_keys, required = schema
+            cfg = row.get("config") or {}
+            unknown = set(cfg) - all_keys
+            self.assertEqual(
+                unknown, set(),
+                f"{pkg} 使用了 schema 中不存在的字段 {sorted(unknown)}；"
+                f"合法字段: {sorted(all_keys)}")
+            missing = required - set(cfg)
+            self.assertEqual(
+                missing, set(), f"{pkg} 缺少必填字段 {sorted(missing)}")
+            checked += 1
+        self.assertGreater(checked, 0, "应至少校验一行（persona）")
 
 
 if __name__ == "__main__":
