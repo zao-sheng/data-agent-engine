@@ -23,11 +23,18 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from setup_dsh import (
+    SRC_PRESET,
+    _agent_preset_supported,
     _block_range,
+    _link_runtime_package,
     _patch_block,
+    _preset_block,
+    _preset_block_range,
     ensure_mcp_client_dep,
     remove_patch,
+    remove_preset_patch,
     upsert_patch,
+    upsert_preset_patch,
 )
 
 try:
@@ -141,6 +148,41 @@ class PatchBlockTest(unittest.TestCase):
         s, e = r
         self.assertIn("# --- end data-agent engine", text[s:e])
         self.assertEqual(text[e:], "y\n")
+
+    def test_block_range_stops_before_foreign_entries_inside_markers(self):
+        """0.1.7 设置导入器会把覆盖条目插进 marker 区间内。
+
+        实况（2026-09-22 升级后）：`ui-settings-general` / `ui-theme` /
+        `agent-default-model` 出现在 `# --- data-agent engine` 与
+        `# --- end data-agent engine` 之间。若 upsert 以 end 标记收口，会用引擎块
+        覆盖掉这些导入设置（用户会丢主题与默认模型）。
+        """
+        block = _patch_block(self.backend)
+        text = (block + "- id: ui-theme\n  config:\n    preference: light\n"
+                "# --- end data-agent engine ---\n")
+        r = _block_range(text)
+        self.assertIsNotNone(r)
+        s, e = r
+        self.assertEqual(text[s:e], block, "块应止于外来条目之前")
+        self.assertIn("ui-theme", text[e:])
+
+    def test_upsert_keeps_foreign_entries_inside_marked_region(self):
+        """回归：upsert 后导入的设置条目必须仍在，且引擎块只有一份。"""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp)
+            patch = profile / "cordis.patch.yml"
+            patch.write_text(
+                "# dsh profile patch layer\n"
+                + _patch_block(self.backend)
+                + "- id: ui-theme\n  config:\n    preference: light\n"
+                + "# --- end data-agent engine ---\n")
+            upsert_patch(profile, self.backend)
+            text = patch.read_text()
+        self.assertEqual(text.count("id: mcp-data-agent"), 1)
+        self.assertIn("preference: light", text, "导入的设置不能被引擎块覆盖")
+        self.assertIn("id: ui-theme", text)
 
 
 class Dsh015CompatTest(unittest.TestCase):
@@ -412,6 +454,155 @@ class PresetSchemaTest(unittest.TestCase):
                 missing, set(), f"{pkg} 缺少必填字段 {sorted(missing)}")
             checked += 1
         self.assertGreater(checked, 0, "应至少校验一行（persona）")
+
+
+class DeclarativePresetTest(unittest.TestCase):
+    """0.1.7+ 声明式预设（旧目录式机制被移除后的回归防线）。
+
+    背景（2026-09-22，DSH 0.1.7-alpha.1 升级）：
+      * `~/.dsh/.agent-presets/<name>/` 不再被任何代码读取，预设改由 patch 里的
+        `@deepseek-ai/dsh-agent-preset` 行声明；
+      * profile patch 的包名按 Node 规则**从 profile 目录向上解析**，运行时自带的
+        `dsh-agent-preset` 不在 profile 链上（`~/.dsh/profiles/node_modules` 农场里
+        只有老包）→ 不建软链就 MODULE_NOT_FOUND，预设静默消失；
+      * 旧 settings.yaml 的 `agent-presets.default` 不会被设置导入器迁移，必须自己
+        覆盖 `agent-preset-registry` 的 `default`，否则默认模式退回 standard。
+    """
+
+    def setUp(self):
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.profile = Path(self._tmp.name)
+        self.patch = self.profile / "cordis.patch.yml"
+        self.backend = "/tmp/backend"
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _docs(self):
+        return yaml.safe_load(self.patch.read_text()) or []
+
+    def _preset_rows(self):
+        docs = self._docs()
+        preset = [r for d in docs if isinstance(d, dict) and "insert" in d
+                  for r in d["insert"] if r["id"] == "preset-data-agent"]
+        self.assertEqual(len(preset), 1, "应恰有一行 preset-data-agent")
+        return preset[0]
+
+    def test_block_declares_preset_and_default(self):
+        block = _preset_block(self.backend)
+        # 新插件实例必须包在 insert 里（同 mcp 块的 2026-08-19 bug）
+        self.assertIn("- insert:", block)
+        for line in block.splitlines():
+            if "id: preset-data-agent" in line:
+                self.assertTrue(line.startswith("    - id:"), repr(line))
+        self.assertIn("name: '@deepseek-ai/dsh-agent-preset'", block)
+        self.assertIn("default: data-agent", block)
+        self.assertIn("id: agent-preset-registry", block)
+
+    def test_block_replaces_legacy_skills_expression(self):
+        """目录式的 `!!js …baseUrl` skills 表达式在 patch 里必须换成绝对路径。"""
+        block = _preset_block(self.backend)
+        self.assertNotIn("!!js", block)
+        self.assertNotIn("baseUrl", block)
+        self.assertIn(str(SRC_PRESET / "skills"), block)
+
+    def test_block_substitutes_backend_and_keeps_rows(self):
+        block = _preset_block(self.backend)
+        self.assertNotIn("{{BACKEND}}", block)
+        if HAS_YAML:
+            self.patch.write_text("# dsh profile patch layer\n[]\n")
+            upsert_preset_patch(self.profile, self.backend)
+            rows = self._preset_rows()["config"]["plugins"]
+            self.assertEqual(
+                [r["id"] for r in rows],
+                ["persona", "skill-filesystem", "tool-skill",
+                 "tool-ask-user", "tool-todo"])
+            self.assertEqual(self._preset_rows()["config"]["id"], "data-agent")
+
+    def test_upsert_replaces_empty_placeholder(self):
+        self.patch.write_text("# dsh profile patch layer\n[]\n")
+        upsert_preset_patch(self.profile, self.backend)
+        text = self.patch.read_text()
+        self.assertNotIn("\n[]", text, "空数组占位应被替换")
+        if HAS_YAML:
+            self.assertEqual(len(self._docs()), 2, "insert + registry 覆盖")
+
+    def test_upsert_is_idempotent_and_keeps_other_entries(self):
+        """预设块与 MCP 块、0.1.7 导入的设置条目必须能共存。"""
+        self.patch.write_text("# dsh profile patch layer\n[]\n")
+        upsert_patch(self.profile, self.backend)
+        upsert_preset_patch(self.profile, self.backend)
+        self.patch.write_text(
+            self.patch.read_text().rstrip() + "\n"
+            "- id: ui-theme\n  config:\n    preference: light\n")
+        upsert_preset_patch(self.profile, self.backend)
+        text = self.patch.read_text()
+        self.assertEqual(text.count("id: preset-data-agent"), 1)
+        self.assertEqual(text.count("id: agent-preset-registry"), 1)
+        self.assertIn("id: mcp-data-agent", text, "MCP 块不能被破坏")
+        self.assertIn("ui-theme", text, "导入的设置条目不能被破坏")
+        if HAS_YAML:
+            self.assertEqual(len(self._docs()), 4)
+
+    def test_remove_preset_drops_declaration_and_default(self):
+        self.patch.write_text("# dsh profile patch layer\n[]\n")
+        upsert_patch(self.profile, self.backend)
+        upsert_preset_patch(self.profile, self.backend)
+        remove_preset_patch(self.profile)
+        text = self.patch.read_text()
+        self.assertNotIn("preset-data-agent", text)
+        self.assertNotIn("agent-preset-registry", text,
+                         "默认 preset 覆盖也要一起撤掉（回到 shipped standard）")
+        self.assertIn("id: mcp-data-agent", text)
+        if HAS_YAML:
+            self.assertEqual(len(self._docs()), 1)
+
+    def test_remove_preset_restores_valid_empty_layer(self):
+        self.patch.write_text("# dsh profile patch layer\n[]\n")
+        upsert_preset_patch(self.profile, self.backend)
+        remove_preset_patch(self.profile)
+        if HAS_YAML:
+            self.assertEqual(self._docs(), [])
+
+    def test_preset_block_range_roundtrip(self):
+        text = "head\n" + _preset_block(self.backend) + "tail\n"
+        r = _preset_block_range(text)
+        self.assertIsNotNone(r)
+        s, e = r
+        self.assertTrue(text[s:].startswith("# --- data-agent preset"))
+        self.assertTrue(text[:e].endswith("# --- end data-agent preset ---\n"))
+        self.assertEqual(text[:s] + text[e:], "head\ntail\n")
+
+    def test_link_runtime_package_creates_farm_symlink(self):
+        """运行时自带的包要投影到 profile 共享 node_modules。"""
+        fake_root = Path(self._tmp.name) / "runtime" / "@deepseek-ai"
+        (fake_root / "dsh-agent-preset").mkdir(parents=True)
+        with mock.patch("setup_dsh._dsh_install_modules", return_value=fake_root):
+            _link_runtime_package(self.profile, "dsh-agent-preset")
+        link = self.profile.parent / "node_modules" / "@deepseek-ai" / "dsh-agent-preset"
+        self.assertTrue(link.is_symlink(), f"应建立软链: {link}")
+        self.assertEqual(Path(os.path.realpath(link)),
+                         Path(os.path.realpath(fake_root / "dsh-agent-preset")))
+
+    def test_link_runtime_package_skips_when_already_resolvable(self):
+        already = (self.profile / "node_modules" / "@deepseek-ai"
+                   / "dsh-agent-preset")
+        already.mkdir(parents=True)
+        with mock.patch("setup_dsh._dsh_install_modules",
+                        side_effect=AssertionError("已可解析时不应探测运行时")):
+            _link_runtime_package(self.profile, "dsh-agent-preset")
+        self.assertFalse(already.is_symlink(), "既有实体目录不应被替换")
+
+    def test_agent_preset_supported_follows_runtime(self):
+        fake_root = Path(self._tmp.name) / "runtime" / "@deepseek-ai"
+        fake_root.mkdir(parents=True)
+        with mock.patch("setup_dsh._dsh_install_modules", return_value=fake_root):
+            self.assertFalse(_agent_preset_supported(), "0.1.6- 无此包 → 走目录式")
+        (fake_root / "dsh-agent-preset").mkdir()
+        with mock.patch("setup_dsh._dsh_install_modules", return_value=fake_root):
+            self.assertTrue(_agent_preset_supported(), "0.1.7+ 自带 → 走声明式")
 
 
 if __name__ == "__main__":

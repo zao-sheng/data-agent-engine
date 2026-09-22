@@ -1,10 +1,17 @@
-"""DSH 自动配置：写 cordis.patch.yml（MCP 接入）+ 建「数据助理」预设。
+"""DSH 自动配置：写 cordis.patch.yml（MCP 接入 + 「数据助理」预设声明）。
 
 三种模式（均幂等）：
   install   —— 首次安装：对齐插件依赖 + upsert patch 块 + 创建预设
   update    —— 更新：对齐插件依赖 + upsert patch（backend 路径可能变化）
                + 备份并覆盖预设（DSH 升级会重置 profile 配置，用此模式修复）
   uninstall —— 卸载：移除 patch 块 + 删除预设（源码/样例库/venv 由 install.sh 清理）
+
+预设安装方式按运行时能力自动选择：
+  * DSH 0.1.7+：声明式——patch 里写 `@deepseek-ai/dsh-agent-preset` 行，并把
+    运行时自带的该包软链到 ~/.dsh/profiles/node_modules（profile patch 的
+    包名按 Node 规则从 profile 目录向上解析，不软链会 MODULE_NOT_FOUND）；
+    旧的 ~/.dsh/.agent-presets/ 目录从此不再被读取。
+  * DSH 0.1.6 及更早：目录式——复制到 ~/.dsh/.agent-presets/data-agent。
 
 用法：
   python dsh-side/setup_dsh.py --backend /abs/path/to/backend            # install
@@ -16,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -32,6 +40,19 @@ _EMPTY_LIST_RE = re.compile(r"(?m)^[ \t]*\[\][ \t]*(?:#.*)?\n?")
 # 顶层 patch 列表项（`- ...` 顶格），用于判断移除后是否还有内容
 _LIST_ENTRY_RE = re.compile(r"(?m)^- ")
 
+# ── DSH 0.1.7+ 的声明式预设（插件组合包）──────────────────────────────
+# 0.1.7 起 Agent 预设不再从 ~/.dsh/.agent-presets/<name>/ 目录加载，改由
+# `@deepseek-ai/dsh-agent-preset` 行在 patch 里声明；旧的目录式预设不会被
+# 任何代码读取（会静默消失，新建会话选不到「数据助理」）。
+AGENT_PRESET_PKG = "@deepseek-ai/dsh-agent-preset"
+AGENT_PRESET_NAME = "dsh-agent-preset"  # 文件系统查找用的短名
+PRESET_ID = "data-agent"
+_PRESET_BLOCK_BEGIN = "# --- data-agent preset (auto-managed by setup_dsh.py) ---"
+_PRESET_BLOCK_END = "# --- end data-agent preset ---"
+# 目录式预设用 baseUrl 相对解析 skills/；声明式 patch 里 baseUrl 指向 profile，
+# 必须换成仓库内 skills 目录的绝对路径
+_LEGACY_SKILLS_RE = re.compile(r"-\s*!!js\s*\"process\.getBuiltinModule\('node:url'\)[^\"]*\"")
+
 
 def _block_range(text: str) -> tuple[int, int] | None:
     """data-agent 块的范围（字符偏移 [start, end)）。行级扫描，兼容新旧块格式：
@@ -45,15 +66,24 @@ def _block_range(text: str) -> tuple[int, int] | None:
         offsets.append(pos)
         pos += len(line)
     start = None
+    end = None
     for i, line in enumerate(lines):
         if line.startswith("# --- data-agent engine"):
             start = i
-        elif start is not None:
-            if line.startswith("# --- end data-agent engine"):
-                return (offsets[start], pos if i + 1 >= len(lines) else offsets[i + 1])
-            if i > start + 1 and line.strip() and not line.startswith((" ", "\t")):
-                return (offsets[start], offsets[i])
-    return (offsets[start], len(text)) if start is not None else None
+            continue
+        if start is None:
+            continue
+        if line.startswith("# --- end data-agent engine"):
+            end = pos if i + 1 >= len(lines) else offsets[i + 1]
+            break
+        # 首个条目（i == start + 1）之后的顶格非空行＝外来条目。DSH 0.1.7 的设置
+        # 导入器会把 ui-theme / agent-default-model 等覆盖条目插进 marker 区间内，
+        # 必须在它之前收口，否则 upsert 会用引擎块把用户设置一起覆盖掉。
+        if i > start + 1 and line.strip() and not line.startswith((" ", "\t")):
+            return (offsets[start], offsets[i])
+    if start is None:
+        return None
+    return (offsets[start], end if end is not None else len(text))
 
 
 def _has_list_entry(text: str) -> bool:
@@ -238,7 +268,184 @@ def ensure_mcp_client_dep(profile: Path) -> bool:
     return need_install
 
 
-def ensure_preset(backend: str, mode: str) -> None:
+def _dsh_install_modules() -> Path | None:
+    """dsh 安装目录下的 `@deepseek-ai` 目录（运行时自带包的真源）。
+
+    与 test_setup_dsh.py 的 `_dsh_plugin_root()` 同一套探测逻辑：从 `which dsh`
+    的真实路径向上找 name == `@deepseek-ai/dsh` 的 package.json。
+    """
+    exe = shutil.which("dsh")
+    if not exe:
+        return None
+    real = Path(os.path.realpath(exe))
+    for cand in [real.parent, *real.parents]:
+        pkg = cand / "package.json"
+        if not pkg.exists():
+            continue
+        try:
+            if json.loads(pkg.read_text()).get("name") == "@deepseek-ai/dsh":
+                return cand / "node_modules" / "@deepseek-ai"
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def _agent_preset_supported() -> bool:
+    """运行时是否自带声明式预设插件（DSH 0.1.7+）。"""
+    roots = _dsh_install_modules()
+    return bool(roots and (roots / AGENT_PRESET_NAME).exists())
+
+
+def _package_resolvable(profile: Path, pkg: str) -> Path | None:
+    """按 Node 规则，profile patch 里的 `name:` 能否解析到 pkg。"""
+    for base in (profile, profile.parent):
+        cand = base / "node_modules" / "@deepseek-ai" / pkg
+        if cand.exists():
+            return cand
+    return None
+
+
+def _link_runtime_package(profile: Path, pkg: str) -> None:
+    """把运行时自带的包投影到 profile 共享 node_modules（幂等）。
+
+    0.1.7 的 profile patch 条目按 Node 规则从 profile 目录向上解析包名，而
+    `@deepseek-ai/dsh-mcp-client`、`@deepseek-ai/dsh-agent-preset` 这类包只在
+    dsh 安装目录里，不在 profile 链上——不建软链就会 `MODULE_NOT_FOUND`，
+    插件被静默跳过（预设列表里看不到「数据助理」）。既有环境的
+    `~/.dsh/profiles/node_modules/@deepseek-ai/dsh-mcp-client` 就是这个形态。
+    """
+    if _package_resolvable(profile, pkg):
+        print(f"ℹ️  {pkg} 已可解析，跳过软链")
+        return
+    roots = _dsh_install_modules()
+    src = roots / pkg if roots else None
+    if not src or not src.exists():
+        print(f"⚠️  未找到运行时自带的 {pkg}，预设行可能加载失败：请确认 DSH ≥ 0.1.7")
+        return
+    link = profile.parent / "node_modules" / "@deepseek-ai" / pkg
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if link.is_symlink() or link.exists():
+        link.unlink()
+    link.symlink_to(src)
+    print(f"✅ 已建立软链: {link} -> {src}")
+
+
+def _preset_rows(backend: str) -> str:
+    """仓库预设行 → 缩进到 `plugins:` 下的 YAML 片段（含 {{BACKEND}} 替换）。"""
+    rows = (SRC_PRESET / "agent.cordis.yml").read_text().replace("{{BACKEND}}", backend)
+    rows = _LEGACY_SKILLS_RE.sub(f"- {SRC_PRESET / 'skills'}", rows)
+    return "\n".join(
+        "" if not line.strip() else " " * 10 + line
+        for line in rows.rstrip("\n").split("\n")
+    )
+
+
+def _preset_block(backend: str) -> str:
+    """data-agent 预设声明块（0.1.7+）。
+
+    语义要点：
+    1. 新插件实例必须包在 `- insert:` 里（同 _patch_block 的 2026-08-19 bug）；
+    2. `default: data-agent` 覆盖 shipped 组合包的 agent-preset-registry 行——
+       等价被 0.1.7 废弃的 settings.yaml `agent-presets.default`（该键不会
+       被设置导入器迁移，必须在这里补回，否则默认模式仍会是 standard）；
+    3. skills 用仓库内绝对路径，避免依赖已废弃的 ~/.dsh/.agent-presets 副本。
+    """
+    meta = (SRC_PRESET / "preset.yml").read_text()
+    name = re.search(r"(?m)^name:[ \t]*(.+?)[ \t]*$", meta).group(1)
+    desc = re.search(r"(?m)^description:[ \t]*(.+?)[ \t]*$", meta).group(1)
+    return f"""{_PRESET_BLOCK_BEGIN}
+- insert:
+    - id: preset-{PRESET_ID}
+      name: '{AGENT_PRESET_PKG}'
+      config:
+        id: {PRESET_ID}
+        name: {name}
+        order: 2
+        description: {desc}
+        plugins:
+{_preset_rows(backend)}
+
+# 默认 preset（等价旧 settings.yaml 的 agent-presets.default: data-agent）
+- id: agent-preset-registry
+  config:
+    default: {PRESET_ID}
+{_PRESET_BLOCK_END}
+"""
+
+
+def _preset_block_range(text: str) -> tuple[int, int] | None:
+    """预设声明块的范围（含 end 标记行与其后的换行）。"""
+    s = text.find(_PRESET_BLOCK_BEGIN)
+    if s < 0:
+        return None
+    e = text.find(_PRESET_BLOCK_END, s)
+    if e < 0:
+        return (s, len(text))
+    e += len(_PRESET_BLOCK_END)
+    if text[e:e + 1] == "\n":
+        e += 1
+    return (s, e)
+
+
+def upsert_preset_patch(profile: Path, backend: str) -> None:
+    """写入/替换预设声明块（幂等，backend 或预设内容变化时更新）。"""
+    patch = profile / "cordis.patch.yml"
+    text = patch.read_text() if patch.exists() else ""
+    block = _preset_block(backend)
+    r = _preset_block_range(text)
+    if r:
+        s, e = r
+        text = text[:s] + block + text[e:]
+        print(f"✅ 已更新 {patch} 中的预设声明块")
+    elif _EMPTY_LIST_RE.search(text):
+        text = _EMPTY_LIST_RE.sub(block.rstrip("\n"), text, count=1)
+        print(f"✅ 已写入 {patch}（替换空数组占位）")
+    else:
+        text = text.rstrip() + "\n" + block
+        print(f"✅ 已写入 {patch}")
+    patch.write_text(text)
+
+
+def remove_preset_patch(profile: Path) -> None:
+    """移除预设声明块（幂等）；只剩注释时补回 `[]` 占位。"""
+    patch = profile / "cordis.patch.yml"
+    if not patch.exists():
+        print("ℹ️  无 patch 文件，跳过预设块")
+        return
+    text = patch.read_text()
+    r = _preset_block_range(text)
+    if not r:
+        print("ℹ️  patch 中无预设声明块，跳过")
+        return
+    s, e = r
+    text = (text[:s] + text[e:]).rstrip() + "\n"
+    if not _has_list_entry(text):
+        text = text.rstrip() + "\n[]\n"
+    patch.write_text(text)
+    print(f"✅ 已从 {patch} 移除预设声明块")
+
+
+def ensure_preset(profile: Path, backend: str, mode: str) -> None:
+    """安装/移除「数据助理」预设。
+
+    DSH 0.1.7+：声明式（patch 里的 preset 行 + 运行时包软链）；
+    0.1.6 及更早：目录式（复制到 ~/.dsh/.agent-presets/data-agent）。
+    """
+    if _agent_preset_supported():
+        if mode == "uninstall":
+            remove_preset_patch(profile)
+        else:
+            _link_runtime_package(profile, AGENT_PRESET_NAME)
+            upsert_preset_patch(profile, backend)
+        if DST_PRESET.exists() and mode == "uninstall":
+            shutil.rmtree(DST_PRESET)
+            print(f"✅ 已删除旧目录预设: {DST_PRESET}")
+        elif DST_PRESET.exists():
+            print(f"ℹ️  旧目录预设 {DST_PRESET} 在 0.1.7+ 已被忽略，"
+                  f"可自行删除（声明式预设已生效）")
+        return
+
+    # ── 0.1.6 及更早：目录式 ─────────────────────────────────────────
     if mode == "uninstall":
         if DST_PRESET.exists():
             shutil.rmtree(DST_PRESET)
@@ -276,7 +483,7 @@ def main() -> None:
 
     if a.mode == "uninstall":
         remove_patch(profile)
-        ensure_preset("", "uninstall")
+        ensure_preset(profile, "", "uninstall")
         print()
         print("已卸载 DSH 配置。如需清理数据文件与依赖：")
         print("  rm -f backend/seed/sample.db && rm -rf backend/.venv   # 或运行 ./install.sh uninstall")
@@ -290,7 +497,7 @@ def main() -> None:
 
     need_install = ensure_mcp_client_dep(profile)
     upsert_patch(profile, backend)
-    ensure_preset(backend, a.mode)
+    ensure_preset(profile, backend, a.mode)
     print()
     if a.mode == "update":
         print("✅ 更新完成。请重启 DSH（或等待 HMR 热生效）后验证。")
